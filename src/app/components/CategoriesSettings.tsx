@@ -12,6 +12,19 @@ interface TaskType {
 }
 
 export default function CategoriesSettings() {
+  // ESC to close all modals
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsAddCategoryModalOpen(false);
+        setIsEditCategoryModalOpen(false);
+        setIsDeleteCategoryModalOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, []);
+
   const [taskTypes, setTaskTypes] = useState<TaskType[]>([]);
   const [isLoadingTaskTypes, setIsLoadingTaskTypes] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{
@@ -384,8 +397,9 @@ export default function CategoriesSettings() {
 
       {/* 添加分类模态框 */}
       {isAddCategoryModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full">
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+          onDoubleClick={(e) => { if (e.target === e.currentTarget) { setIsAddCategoryModalOpen(false); setIsEditCategoryModalOpen(false); setIsDeleteCategoryModalOpen(false); } }}>
+          <div className="bg-white rounded-lg p-6 max-w-md w-full shadow-xl" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-xl font-semibold mb-4 text-gray-900">添加新分类</h2>
 
             <form onSubmit={handleAddCategory}>
@@ -420,7 +434,7 @@ export default function CategoriesSettings() {
                 </label>
                 <textarea value={newCategoryPrompt}
                   onChange={(e) => setNewCategoryPrompt(e.target.value)}
-                  rows={6}
+                  rows={8}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-700 font-mono"
                   placeholder={DEFAULT_PROMPT}
                 />
@@ -442,8 +456,9 @@ export default function CategoriesSettings() {
 
       {/* 编辑分类模态框 */}
       {isEditCategoryModalOpen && editingCategory && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full">
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+          onDoubleClick={(e) => { if (e.target === e.currentTarget) { setIsAddCategoryModalOpen(false); setIsEditCategoryModalOpen(false); setIsDeleteCategoryModalOpen(false); } }}>
+          <div className="bg-white rounded-lg p-6 max-w-md w-full shadow-xl" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-xl font-semibold mb-4 text-gray-900">编辑分类</h2>
 
             <form onSubmit={handleUpdateCategory}>
@@ -469,7 +484,7 @@ export default function CategoriesSettings() {
                 </label>
                 <textarea value={editCategoryPrompt}
                   onChange={(e) => setEditCategoryPrompt(e.target.value)}
-                  rows={6}
+                  rows={8}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-700 font-mono"
                   placeholder={DEFAULT_PROMPT}
                 />
@@ -492,8 +507,9 @@ export default function CategoriesSettings() {
 
       {/* 删除分类确认模态框 */}
       {isDeleteCategoryModalOpen && deletingCategory && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full">
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+          onDoubleClick={(e) => { if (e.target === e.currentTarget) { setIsAddCategoryModalOpen(false); setIsEditCategoryModalOpen(false); setIsDeleteCategoryModalOpen(false); } }}>
+          <div className="bg-white rounded-lg p-6 max-w-md w-full shadow-xl" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-xl font-semibold mb-4 text-gray-900">删除分类</h2>
 
             <p className="text-gray-600 mb-2">

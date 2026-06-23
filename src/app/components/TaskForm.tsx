@@ -19,7 +19,7 @@ interface Tag {
 }
 
 export default function TaskForm() {
-  const { triggerRefresh, showNotification, prefillParentId, setPrefillParentId } = useTaskContext();
+  const { triggerRefresh, showNotification, prefillParentId, setPrefillParentId, setShowAddTaskForm } = useTaskContext();
   const formRef = useRef<HTMLDivElement>(null);
   const [formData, setFormData] = useState({
     name: '',
@@ -161,8 +161,8 @@ export default function TaskForm() {
       setParentId('');
       // Trigger refresh of the task list
       triggerRefresh();
-      // Show success notification instead of alert
       showNotification('success', '任务添加成功！');
+      setShowAddTaskForm(false);
     } catch (err) {
       console.error('Error adding task:', err);
       setError('添加任务失败，请重试');
@@ -174,7 +174,7 @@ export default function TaskForm() {
   };
 
   return (
-    <div ref={formRef} className="max-w-2xl mx-auto p-6 bg-white rounded-lg shadow-md">
+    <div ref={formRef} className="max-w-xl mx-auto p-6 bg-white rounded-lg shadow-md">
       <h2 className="text-2xl font-bold mb-6 text-gray-900">添加新任务</h2>
       
       {error && (
@@ -210,7 +210,7 @@ export default function TaskForm() {
             value={formData.description}
             onChange={handleInputChange}
             rows={3}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 resize-y"
             placeholder="输入详细描述（可选）"
             disabled={isLoading}
           />

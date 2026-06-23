@@ -3,9 +3,11 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { CiSettings } from 'react-icons/ci';
+import { useTaskContext } from '@/app/lib/TaskContext';
 
 export default function TasksHeader() {
   const router = useRouter();
+  const { setShowAddTaskForm } = useTaskContext();
 
   return (
     <div className="flex justify-between items-center">
@@ -18,10 +20,22 @@ export default function TasksHeader() {
 
       <div className="flex items-center gap-3">
         <button
+          onClick={() => setShowAddTaskForm(true)}
+          className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium"
+        >
+          添加新任务
+        </button>
+        <button
           onClick={() => router.push('/report')}
           className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium"
         >
           生成报告
+        </button>
+        <button
+          onClick={() => router.push('/tasks/summary')}
+          className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 text-sm font-medium"
+        >
+          摘要编写
         </button>
 
         <div className="relative group">

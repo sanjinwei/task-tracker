@@ -4,8 +4,10 @@
 import { prisma } from '@/app/lib/prisma';
 
 export async function getAllTaskTypes() {
-  // Get all task types - let the frontend sort by order
-  return await prisma.taskType.findMany();
+  // Get all task types ordered by sortOrder
+  return await prisma.taskType.findMany({
+    orderBy: { sortOrder: 'asc' },
+  });
 }
 
 /**

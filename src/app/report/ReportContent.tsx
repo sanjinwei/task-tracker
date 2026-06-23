@@ -167,6 +167,13 @@ function ReportSection({
 }
 
 export default function ReportContent() {
+  // ESC to close download modal
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowDownloadModal(false); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, []);
+
   const [tasks, setTasks] = useState<TaskWithType[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -334,6 +341,10 @@ export default function ReportContent() {
             className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300">
             返回任务
           </button>
+          <button onClick={() => router.push('/tasks/summary')}
+            className="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 text-sm font-medium">
+            摘要编写
+          </button>
           <button onClick={() => { setShowDownloadModal(true); deselectAll(); }} disabled={downloadItems.length === 0}
             className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50">
             下载报告
@@ -471,8 +482,9 @@ export default function ReportContent() {
 
       {/* Download Modal */}
       {showDownloadModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg p-6 max-w-lg w-full max-h-[80vh] flex flex-col">
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+          onDoubleClick={(e) => { if (e.target === e.currentTarget) setShowDownloadModal(false); }}>
+          <div className="bg-white rounded-lg p-6 max-w-lg w-full max-h-[80vh] flex flex-col shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-semibold text-gray-900">选择下载报告</h2>
               <button onClick={() => setShowDownloadModal(false)} className="text-gray-400 hover:text-gray-600">

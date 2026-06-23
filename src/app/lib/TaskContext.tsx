@@ -2,7 +2,6 @@
 
 import { createContext, useContext, useState, ReactNode } from 'react';
 
-// Define notification type
 export type NotificationType = 'success' | 'error' | 'info';
 
 export interface Notification {
@@ -18,6 +17,8 @@ interface TaskContextType {
   clearNotification: () => void;
   prefillParentId: string | null;
   setPrefillParentId: (id: string | null) => void;
+  showAddTaskForm: boolean;
+  setShowAddTaskForm: (show: boolean) => void;
 }
 
 const TaskContext = createContext<TaskContextType | undefined>(undefined);
@@ -26,6 +27,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [notification, setNotification] = useState<Notification | null>(null);
   const [prefillParentId, setPrefillParentId] = useState<string | null>(null);
+  const [showAddTaskForm, setShowAddTaskForm] = useState(false);
 
   const triggerRefresh = () => {
     setRefreshTrigger(prev => prev + 1);
@@ -33,11 +35,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
 
   const showNotification = (type: NotificationType, message: string) => {
     setNotification({ type, message });
-
-    // Auto-clear notifications after 5 seconds
-    setTimeout(() => {
-      setNotification(null);
-    }, 5000);
+    setTimeout(() => { setNotification(null); }, 5000);
   };
 
   const clearNotification = () => {
@@ -46,13 +44,10 @@ export function TaskProvider({ children }: { children: ReactNode }) {
 
   return (
     <TaskContext.Provider value={{
-      refreshTrigger,
-      triggerRefresh,
-      notification,
-      showNotification,
-      clearNotification,
-      prefillParentId,
-      setPrefillParentId,
+      refreshTrigger, triggerRefresh,
+      notification, showNotification, clearNotification,
+      prefillParentId, setPrefillParentId,
+      showAddTaskForm, setShowAddTaskForm,
     }}>
       {children}
     </TaskContext.Provider>

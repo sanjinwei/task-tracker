@@ -69,6 +69,12 @@ export default function SummaryPageClient({ taskId, from }: { taskId?: string; f
   const [relatedTasks, setRelatedTasks] = useState<RelatedTask[]>([]);
   const [showTaskPicker, setShowTaskPicker] = useState(false);
   const [taskPickerData, setTaskPickerData] = useState<TaskPickerItem[]>([]);
+  // ESC to close task picker
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowTaskPicker(false); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, []);
   const [pickerLoading, setPickerLoading] = useState(false);
 
   // Related files state
@@ -399,15 +405,16 @@ export default function SummaryPageClient({ taskId, from }: { taskId?: string; f
 
         {/* Header */}
         <div className="sticky top-0 z-10 bg-gray-50 pb-4 flex justify-between items-center mb-6">
-          <Link href={from === 'report' ? '/report' : '/tasks'}
-            className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z" clipRule="evenodd" />
-            </svg>
-            {from === 'report' ? '返回报告' : '返回任务'}
-          </Link>
+          <div></div>
 
           <div className="flex items-center gap-2">
+            <Link href={from === 'report' ? '/report' : '/tasks'}
+              className="inline-flex items-center px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1.5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z" clipRule="evenodd" />
+              </svg>
+              {from === 'report' ? '返回报告' : '返回任务'}
+            </Link>
             <Link href="/tasks"
               className="inline-flex items-center px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
               Home
@@ -620,8 +627,9 @@ export default function SummaryPageClient({ taskId, from }: { taskId?: string; f
 
         {/* Task Picker Modal */}
         {showTaskPicker && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-lg p-6 max-w-lg w-full max-h-[80vh] overflow-y-auto">
+          <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+            onDoubleClick={(e) => { if (e.target === e.currentTarget) setShowTaskPicker(false); }}>
+            <div className="bg-white rounded-lg p-6 max-w-lg w-full max-h-[80vh] overflow-y-auto shadow-xl" onClick={(e) => e.stopPropagation()}>
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-xl font-semibold text-gray-900">选择相关任务</h2>
                 <button onClick={() => setShowTaskPicker(false)} className="text-gray-400 hover:text-gray-600">

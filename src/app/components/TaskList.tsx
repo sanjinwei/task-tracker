@@ -45,6 +45,13 @@ interface EditModalProps {
 }
 
 function EditModal({ task, taskTypes, tags, parentOptions, onClose, onSave }: EditModalProps) {
+  // ESC key to close
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [onClose]);
+
   const [name, setName] = useState(task.name || '');
   const [description, setDescription] = useState(task.description || '');
   const [type, setType] = useState(task.type?.name || '');
@@ -81,8 +88,9 @@ function EditModal({ task, taskTypes, tags, parentOptions, onClose, onSave }: Ed
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-lg p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+      onDoubleClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="bg-white rounded-lg p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-xl" onClick={(e) => e.stopPropagation()}>
         <h2 className="text-xl font-semibold mb-4 text-gray-900">编辑任务</h2>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -91,7 +99,7 @@ function EditModal({ task, taskTypes, tags, parentOptions, onClose, onSave }: Ed
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-gray-900"
+              className="mt-1 block w-full rounded-md border border-gray-300 bg-white shadow-sm focus:border-blue-500 focus:ring-blue-500 text-gray-900"
               placeholder="输入任务名称"
             />
           </div>
@@ -101,8 +109,8 @@ function EditModal({ task, taskTypes, tags, parentOptions, onClose, onSave }: Ed
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              rows={3}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-gray-900"
+              rows={4}
+              className="mt-1 block w-full rounded-md border border-gray-300 bg-white shadow-sm focus:border-blue-500 focus:ring-blue-500 text-gray-900"
               placeholder="输入详细描述（可选）"
             />
           </div>
@@ -115,7 +123,7 @@ function EditModal({ task, taskTypes, tags, parentOptions, onClose, onSave }: Ed
             <select
               value={parentId}
               onChange={(e) => setParentId(e.target.value)}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-gray-900"
+              className="mt-1 block w-full rounded-md border border-gray-300 bg-white shadow-sm focus:border-blue-500 focus:ring-blue-500 text-gray-900"
               disabled={isSubmitting || hasChildren}
             >
               <option value="">无（顶级任务）</option>
@@ -134,7 +142,7 @@ function EditModal({ task, taskTypes, tags, parentOptions, onClose, onSave }: Ed
             <select
               value={type}
               onChange={(e) => setType(e.target.value)}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-gray-900"
+              className="mt-1 block w-full rounded-md border border-gray-300 bg-white shadow-sm focus:border-blue-500 focus:ring-blue-500 text-gray-900"
             >
               <option value="">选择分类</option>
               {taskTypes.map((t) => (
@@ -175,7 +183,7 @@ function EditModal({ task, taskTypes, tags, parentOptions, onClose, onSave }: Ed
               type="date"
               value={date}
               onChange={(e) => setDate(e.target.value)}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-gray-900"
+              className="mt-1 block w-full rounded-md border border-gray-300 bg-white shadow-sm focus:border-blue-500 focus:ring-blue-500 text-gray-900"
               required
             />
           </div>
@@ -186,7 +194,7 @@ function EditModal({ task, taskTypes, tags, parentOptions, onClose, onSave }: Ed
               type="url"
               value={link}
               onChange={(e) => setLink(e.target.value)}
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-gray-900"
+              className="mt-1 block w-full rounded-md border border-gray-300 bg-white shadow-sm focus:border-blue-500 focus:ring-blue-500 text-gray-900"
             />
           </div>
 
@@ -296,6 +304,19 @@ function TaskCard({
 
 export default function TaskList() {
   const { refreshTrigger, showNotification, setPrefillParentId } = useTaskContext();
+
+  // Global ESC handler to close modals
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setEditingTask(null);
+        setDeletingTaskId(null);
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, []);
+
   const [allTasks, setAllTasks] = useState<Task[]>([]);
   const [taskTypes, setTaskTypes] = useState<{ name: string; label: string; }[]>([]);
   const [tags, setTags] = useState<{ name: string; label: string; }[]>([]);
@@ -660,8 +681,9 @@ export default function TaskList() {
 
       {/* Delete Confirmation Modal */}
       {deletingTaskId && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full">
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+          onDoubleClick={(e) => { if (e.target === e.currentTarget) setDeletingTaskId(null); }}>
+          <div className="bg-white rounded-lg p-6 max-w-md w-full shadow-xl" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-xl font-semibold mb-4">删除任务</h2>
             {deletingTaskChildCount > 0 ? (
               <p className="text-gray-600 mb-6">

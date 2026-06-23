@@ -10,6 +10,19 @@ interface Tag {
 }
 
 export default function TagsSettings() {
+  // ESC to close all modals
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsAddTagModalOpen(false);
+        setIsEditTagModalOpen(false);
+        setIsDeleteTagModalOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, []);
+
   const [tags, setTags] = useState<Tag[]>([]);
   const [isLoadingTags, setIsLoadingTags] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{
@@ -291,8 +304,9 @@ export default function TagsSettings() {
 
       {/* 添加标签模态框 */}
       {isAddTagModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full">
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+          onDoubleClick={(e) => { if (e.target === e.currentTarget) { setIsAddTagModalOpen(false); setIsEditTagModalOpen(false); setIsDeleteTagModalOpen(false); } }}>
+          <div className="bg-white rounded-lg p-6 max-w-md w-full shadow-xl" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-xl font-semibold mb-4 text-gray-900">添加新标签</h2>
 
             <form onSubmit={handleAddTag}>
@@ -330,8 +344,9 @@ export default function TagsSettings() {
 
       {/* 编辑标签模态框 */}
       {isEditTagModalOpen && editingTag && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full">
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+          onDoubleClick={(e) => { if (e.target === e.currentTarget) { setIsAddTagModalOpen(false); setIsEditTagModalOpen(false); setIsDeleteTagModalOpen(false); } }}>
+          <div className="bg-white rounded-lg p-6 max-w-md w-full shadow-xl" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-xl font-semibold mb-4 text-gray-900">编辑标签</h2>
 
             <form onSubmit={handleUpdateTag}>
@@ -363,8 +378,9 @@ export default function TagsSettings() {
 
       {/* 删除标签确认模态框 */}
       {isDeleteTagModalOpen && deletingTag && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full">
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+          onDoubleClick={(e) => { if (e.target === e.currentTarget) { setIsAddTagModalOpen(false); setIsEditTagModalOpen(false); setIsDeleteTagModalOpen(false); } }}>
+          <div className="bg-white rounded-lg p-6 max-w-md w-full shadow-xl" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-xl font-semibold mb-4 text-gray-900">删除标签</h2>
 
             <p className="text-gray-600 mb-2">
