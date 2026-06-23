@@ -1,14 +1,5 @@
 // Import the Task type
 import { Task } from '@/app/types';
-import { getLockedReportingPeriodAction } from '@/app/tasks/actions';
-
-/**
- * @deprecated Use getLockedReportingPeriodAction instead
- * This function is kept for backward compatibility but simply forwards to getLockedReportingPeriodAction
- */
-export async function getCurrentReportingPeriod(): Promise<{ periodStart: Date; periodEnd: Date }> {
-  return getLockedReportingPeriodAction();
-}
 
 /**
  * Adds a specified number of days to a date
@@ -45,15 +36,52 @@ export function extractPlainTextFromReport(html: string): string {
   if (!html || html.trim() === '') {
     return '';
   }
-  
-  // Remove HTML tags and decode HTML entities
-  const text = html
-    .replace(/<h[2-3]>(.*?)<\/h[2-3]>/g, '\n$1\n') // Convert headers to newlines
-    .replace(/<a href=".*?">#<\/a>/g, '') // Remove link tags
-    .replace(/<li>(.*?)<\/li>/g, '• $1\n') // Convert list items to bullet points
-    .replace(/<ul>|<\/ul>/g, '') // Remove ul tags
-    .replace(/&nbsp;/g, ' ') // Replace &nbsp; with spaces
-    .trim();
+
+  // Remove link tags and &nbsp;
+  const processed = html
+    .replace(/<a href=".*?">#<\/a>/g, '')
+    .replace(/&nbsp;/g, ' ');
+
+  // Recursively flatten nested <ul> structures
+  function flattenLists(html: string, indent: number): string {
+    let result = '';
+    const liRegex = /<li>([\s\S]*?)<\/li>/g;
+    let match;
+
+    while ((match = liRegex.exec(html)) !== null) {
+      const content = match[1];
+      const nestedUlMatch = content.match(/<ul>([\s\S]*?)<\/ul>/);
+      const prefix = '  '.repeat(indent) + '• ';
+
+      if (nestedUlMatch) {
+        // This <li> contains a nested <ul>
+        const mainText = content.replace(/<ul>[\s\S]*?<\/ul>/, '').trim();
+        if (mainText) {
+          result += prefix + mainText + '\n';
+        }
+        // Recurse into nested <ul>
+        result += flattenLists(nestedUlMatch[1], indent + 1);
+      } else {
+        const text = content.trim();
+        if (text) {
+          result += prefix + text + '\n';
+        }
+      }
+    }
+
+    return result;
+  }
+
+  // Extract <ul> blocks and flatten them
+  const ulRegex = /<ul>([\s\S]*?)<\/ul>/g;
+  let text = processed;
+  text = text.replace(ulRegex, (_, ulContent) => flattenLists(ulContent, 0));
+
+  // Convert headers to newlines
+  text = text.replace(/<h[2-3]>(.*?)<\/h[2-3]>/g, '\n$1\n');
+
+  // Clean up remaining tags
+  text = text.replace(/<[^>]+>/g, '');
 
   // Clean up multiple newlines and spaces
   return text

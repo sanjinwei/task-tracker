@@ -30,10 +30,10 @@ export default function SettingsPage() {
     return (
       <div className="container mx-auto p-6">
         <div className="mb-6 flex justify-between items-center">
-          <h1 className="text-3xl font-bold">Settings</h1>
+          <h1 className="text-3xl font-bold">设置</h1>
         </div>
         <div className="bg-white shadow-md rounded-lg overflow-hidden">
-          <div className="p-6">Loading settings...</div>
+          <div className="p-6">加载设置中...</div>
         </div>
       </div>
     );
@@ -42,12 +42,12 @@ export default function SettingsPage() {
   return (
     <div className="container mx-auto p-6">
       <div className="mb-6 flex justify-between items-center">
-        <h1 className="text-3xl font-bold">Settings</h1>
-        <button 
+        <h1 className="text-3xl font-bold">设置</h1>
+        <button
           onClick={goToTasksPage}
           className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
         >
-          Back to Tasks
+          返回任务
         </button>
       </div>
       
@@ -62,7 +62,7 @@ export default function SettingsPage() {
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
-              General
+              通用
             </button>
             <button
               onClick={() => setActiveTab('categories')}
@@ -72,7 +72,7 @@ export default function SettingsPage() {
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
-              Categories
+              分类
             </button>
             <button
               onClick={() => setActiveTab('tags')}
@@ -82,7 +82,7 @@ export default function SettingsPage() {
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
-              Tags
+              标签
             </button>
             <button
               onClick={() => setActiveTab('automation')}
@@ -92,7 +92,7 @@ export default function SettingsPage() {
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
-              Automation
+              自动化
             </button>
             <button
               onClick={() => setActiveTab('aiconfig')}
@@ -102,7 +102,7 @@ export default function SettingsPage() {
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
-              AI Config
+              AI 配置
             </button>
           </nav>
         </div>

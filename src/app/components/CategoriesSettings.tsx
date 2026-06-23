@@ -3,12 +3,12 @@
 import { useState, useEffect } from 'react';
 import { getTaskTypes, createTaskType, updateTaskType, deleteTaskType, updateTaskTypeOrder } from '@/app/settings/actions';
 
-// Define the TaskType interface
 interface TaskType {
   id: string;
   name: string;
   label: string;
   sortOrder?: number;
+  prompt?: string | null;
 }
 
 export default function CategoriesSettings() {
@@ -22,19 +22,39 @@ export default function CategoriesSettings() {
   const [isEditCategoryModalOpen, setIsEditCategoryModalOpen] = useState(false);
   const [isDeleteCategoryModalOpen, setIsDeleteCategoryModalOpen] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
+  const [newCategorySysName, setNewCategorySysName] = useState('');
+  const [newSysTouched, setNewSysTouched] = useState(false);
   const [editingCategory, setEditingCategory] = useState<TaskType | null>(null);
   const [deletingCategory, setDeletingCategory] = useState<TaskType | null>(null);
   const [editCategoryName, setEditCategoryName] = useState('');
+  const [editCategorySysName, setEditCategorySysName] = useState('');
+  const [newCategoryPrompt, setNewCategoryPrompt] = useState('');
+  const [editCategoryPrompt, setEditCategoryPrompt] = useState('');
   const [isAddingCategory, setIsAddingCategory] = useState(false);
   const [isEditingCategory, setIsEditingCategory] = useState(false);
   const [isDeletingCategory, setIsDeletingCategory] = useState(false);
 
-  // Load task types when the component mounts
   useEffect(() => {
     loadTaskTypes();
   }, []);
 
-  // Load task types function
+  const DEFAULT_PROMPT = `你是一个专业的工作报告撰写助手。请基于以下信息，为当前任务生成一份简洁的进度报告。
+
+%TASK_SUMMARY%
+
+请生成一份结构化的报告，包含以下内容：
+1. 任务概述
+2. 关键进展
+3. 遇到的问题与解决方案
+4. 下一步计划`;
+
+  // Auto-generate system name from label (only when user hasn't manually edited it)
+  useEffect(() => {
+    if (!newSysTouched && newCategoryName) {
+      setNewCategorySysName(newCategoryName.trim().toUpperCase().replace(/\s+/g, '_'));
+    }
+  }, [newCategoryName, newSysTouched]);
+
   const loadTaskTypes = async () => {
     setIsLoadingTaskTypes(true);
     try {
@@ -44,7 +64,7 @@ export default function CategoriesSettings() {
       console.error('Error loading task types:', error);
       setStatusMessage({
         type: 'error',
-        text: 'Failed to load task categories'
+        text: '加载分类失败'
       });
     } finally {
       setIsLoadingTaskTypes(false);
@@ -53,32 +73,29 @@ export default function CategoriesSettings() {
 
   const handleAddCategory = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!newCategoryName.trim()) {
       return;
     }
-    
+
     setIsAddingCategory(true);
     setStatusMessage(null);
-    
+
     try {
-      const result = await createTaskType(newCategoryName);
-      
+      const result = await createTaskType(newCategoryName, newCategorySysName || undefined, newCategoryPrompt || undefined);
+
       if (result.success) {
-        // Close the modal and reset the input
         setIsAddCategoryModalOpen(false);
         setNewCategoryName('');
-        
-        // Refresh the task types list
+        setNewCategorySysName('');
+        setNewSysTouched(false);
+        setNewCategoryPrompt('');
         await loadTaskTypes();
-        
-        // Show success message
         setStatusMessage({
           type: 'success',
           text: result.message
         });
       } else {
-        // Show error message
         setStatusMessage({
           type: 'error',
           text: result.message
@@ -88,7 +105,7 @@ export default function CategoriesSettings() {
       console.error('Error adding category:', error);
       setStatusMessage({
         type: 'error',
-        text: 'An unexpected error occurred'
+        text: '发生未知错误'
       });
     } finally {
       setIsAddingCategory(false);
@@ -98,38 +115,34 @@ export default function CategoriesSettings() {
   const handleEditCategoryClick = (category: TaskType) => {
     setEditingCategory(category);
     setEditCategoryName(category.label);
+    setEditCategorySysName(category.name);
+    setEditCategoryPrompt(category.prompt || '');
     setIsEditCategoryModalOpen(true);
   };
 
   const handleUpdateCategory = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!editCategoryName.trim() || !editingCategory) {
       return;
     }
-    
+
     setIsEditingCategory(true);
     setStatusMessage(null);
-    
+
     try {
-      const result = await updateTaskType(editingCategory.id, editCategoryName);
-      
+      const result = await updateTaskType(editingCategory.id, editCategoryName, editCategorySysName, editCategoryPrompt || undefined);
+
       if (result.success) {
-        // Close the modal and reset the state
         setIsEditCategoryModalOpen(false);
         setEditingCategory(null);
         setEditCategoryName('');
-        
-        // Refresh the task types list
         await loadTaskTypes();
-        
-        // Show success message
         setStatusMessage({
           type: 'success',
           text: result.message
         });
       } else {
-        // Show error message
         setStatusMessage({
           type: 'error',
           text: result.message
@@ -139,7 +152,7 @@ export default function CategoriesSettings() {
       console.error('Error updating category:', error);
       setStatusMessage({
         type: 'error',
-        text: 'An unexpected error occurred'
+        text: '发生未知错误'
       });
     } finally {
       setIsEditingCategory(false);
@@ -155,27 +168,21 @@ export default function CategoriesSettings() {
     if (!deletingCategory) {
       return;
     }
-    
+
     setIsDeletingCategory(true);
     setStatusMessage(null);
-    
+
     try {
       const result = await deleteTaskType(deletingCategory.id);
-      
+
       if (result.success) {
-        // Close the modal and reset the state
         closeDeleteModal();
-        
-        // Refresh the task types list
         await loadTaskTypes();
-        
-        // Show success message
         setStatusMessage({
           type: 'success',
           text: result.message
         });
       } else {
-        // Show error message
         setStatusMessage({
           type: 'error',
           text: result.message
@@ -185,7 +192,7 @@ export default function CategoriesSettings() {
       console.error('Error deleting category:', error);
       setStatusMessage({
         type: 'error',
-        text: 'An unexpected error occurred'
+        text: '发生未知错误'
       });
     } finally {
       setIsDeletingCategory(false);
@@ -196,6 +203,8 @@ export default function CategoriesSettings() {
     setIsEditCategoryModalOpen(false);
     setEditingCategory(null);
     setEditCategoryName('');
+    setEditCategorySysName('');
+    setEditCategoryPrompt('');
   };
 
   const closeDeleteModal = () => {
@@ -203,66 +212,48 @@ export default function CategoriesSettings() {
     setDeletingCategory(null);
   };
 
-  // Handle moving a category up in order
   const handleMoveCategoryUp = async (category: TaskType, index: number) => {
-    if (index === 0) return; // Already at the top
-    
+    if (index === 0) return;
+
     const prevCategory = taskTypes[index - 1];
-    
-    // Swap orders
+
     try {
       setStatusMessage(null);
-      
-      // Update the current category to have the previous one's order
       await updateTaskTypeOrder(category.id, prevCategory.sortOrder || 0);
-      
-      // Update the previous category to have the current one's order
       await updateTaskTypeOrder(prevCategory.id, category.sortOrder || 0);
-      
-      // Refresh the task types list
       await loadTaskTypes();
-      
       setStatusMessage({
         type: 'success',
-        text: 'Category order updated successfully'
+        text: '分类排序更新成功'
       });
     } catch (error) {
       console.error('Error moving category up:', error);
       setStatusMessage({
         type: 'error',
-        text: 'Failed to update category order'
+        text: '分类排序更新失败'
       });
     }
   };
-  
-  // Handle moving a category down in order
+
   const handleMoveCategoryDown = async (category: TaskType, index: number) => {
-    if (index === taskTypes.length - 1) return; // Already at the bottom
-    
+    if (index === taskTypes.length - 1) return;
+
     const nextCategory = taskTypes[index + 1];
-    
-    // Swap orders
+
     try {
       setStatusMessage(null);
-      
-      // Update the current category to have the next one's order
       await updateTaskTypeOrder(category.id, nextCategory.sortOrder || 0);
-      
-      // Update the next category to have the current one's order
       await updateTaskTypeOrder(nextCategory.id, category.sortOrder || 0);
-      
-      // Refresh the task types list
       await loadTaskTypes();
-      
       setStatusMessage({
         type: 'success',
-        text: 'Category order updated successfully'
+        text: '分类排序更新成功'
       });
     } catch (error) {
       console.error('Error moving category down:', error);
       setStatusMessage({
         type: 'error',
-        text: 'Failed to update category order'
+        text: '分类排序更新失败'
       });
     }
   };
@@ -271,16 +262,16 @@ export default function CategoriesSettings() {
     <div className="bg-white rounded-md shadow p-6">
       {statusMessage && (
         <div className={`mb-6 p-4 rounded-md ${
-          statusMessage.type === 'success' 
+          statusMessage.type === 'success'
             ? 'bg-green-50 text-green-700'
             : 'bg-red-50 text-red-700'
         }`}>
           {statusMessage.text}
         </div>
       )}
-      
+
       <div className="flex justify-between items-center mb-6">
-        <h2 className="text-xl font-semibold text-gray-800">Categories</h2>
+        <h2 className="text-xl font-semibold text-gray-800">分类管理</h2>
         <button
           type="button"
           onClick={() => setIsAddCategoryModalOpen(true)}
@@ -289,19 +280,19 @@ export default function CategoriesSettings() {
           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
             <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
           </svg>
-          Add Category
+          添加分类
         </button>
       </div>
-      
+
       {isLoadingTaskTypes ? (
         <div className="text-center py-6">
-          <p className="text-gray-500">Loading categories...</p>
+          <p className="text-gray-500">加载分类中...</p>
         </div>
       ) : taskTypes.length === 0 ? (
         <div className="bg-gray-50 p-6 text-center rounded-lg border border-gray-200">
-          <p className="text-gray-500 mb-2">No categories found</p>
+          <p className="text-gray-500 mb-2">暂无分类</p>
           <p className="text-sm text-gray-500">
-            Categories help you organize your tasks. Click &quot;Add Category&quot; to create your first category.
+            分类帮助您整理任务。点击「添加分类」创建第一个分类。
           </p>
         </div>
       ) : (
@@ -310,16 +301,16 @@ export default function CategoriesSettings() {
             <thead className="bg-gray-50">
               <tr>
                 <th scope="col" className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 sm:pl-6">
-                  Order
+                  排序
                 </th>
                 <th scope="col" className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900">
-                  Category Name
+                  分类名称
                 </th>
                 <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
-                  System Name
+                  系统名称
                 </th>
                 <th scope="col" className="relative py-3.5 pl-3 pr-4 sm:pr-6">
-                  <span className="sr-only">Actions</span>
+                  <span className="sr-only">操作</span>
                 </th>
               </tr>
             </thead>
@@ -337,50 +328,46 @@ export default function CategoriesSettings() {
                   </td>
                   <td className="whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
                     <div className="flex items-center justify-end space-x-3">
-                      {/* Move up icon */}
                       <button
                         type="button"
                         onClick={() => handleMoveCategoryUp(category, index)}
                         className={`text-gray-500 hover:text-blue-600 ${index === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
-                        title="Move up"
+                        title="上移"
                         disabled={index === 0}
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
                         </svg>
                       </button>
-                      
-                      {/* Move down icon */}
+
                       <button
                         type="button"
                         onClick={() => handleMoveCategoryDown(category, index)}
                         className={`text-gray-500 hover:text-blue-600 ${index === taskTypes.length - 1 ? 'opacity-50 cursor-not-allowed' : ''}`}
-                        title="Move down"
+                        title="下移"
                         disabled={index === taskTypes.length - 1}
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                         </svg>
                       </button>
-                      
-                      {/* Edit icon */}
+
                       <button
                         type="button"
                         onClick={() => handleEditCategoryClick(category)}
                         className="text-gray-500 hover:text-blue-600"
-                        title="Edit category"
+                        title="编辑分类"
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                           <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
                         </svg>
                       </button>
-                      
-                      {/* Delete icon */}
+
                       <button
                         type="button"
                         onClick={() => handleDeleteCategoryClick(category)}
                         className="text-gray-500 hover:text-red-600"
-                        title="Delete category"
+                        title="删除分类"
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                           <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
@@ -395,44 +382,57 @@ export default function CategoriesSettings() {
         </div>
       )}
 
-      {/* Add Category Modal */}
+      {/* 添加分类模态框 */}
       {isAddCategoryModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full">
-            <h2 className="text-xl font-semibold mb-4 text-gray-900">Add New Category</h2>
-            
+            <h2 className="text-xl font-semibold mb-4 text-gray-900">添加新分类</h2>
+
             <form onSubmit={handleAddCategory}>
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Category Name
-                </label>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">分类名称</label>
                 <input
                   type="text"
                   value={newCategoryName}
                   onChange={(e) => setNewCategoryName(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
-                  placeholder="e.g. Code Review"
+                  placeholder="例如：代码审查"
                   required
                 />
-                <p className="mt-1 text-sm text-gray-500">
-                  System name will be automatically generated as: {newCategoryName ? newCategoryName.trim().toUpperCase().replace(/\s+/g, '_') : 'CODE_REVIEW'}
-                </p>
               </div>
-              
+
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-1">系统名称</label>
+                <input
+                  type="text"
+                  value={newCategorySysName}
+                  onChange={(e) => { setNewCategorySysName(e.target.value); setNewSysTouched(true); }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 font-mono text-sm"
+                  placeholder="例如：CODE_REVIEW"
+                />
+                <p className="mt-1 text-sm text-gray-500">建议英文大写+下划线，代码中引用使用</p>
+              </div>
+
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  AI 提示词
+                  <span className="ml-1 text-xs text-gray-400 font-normal">（用于 AI 摘要，支持 %TASK_SUMMARY% 占位符）</span>
+                </label>
+                <textarea value={newCategoryPrompt}
+                  onChange={(e) => setNewCategoryPrompt(e.target.value)}
+                  rows={6}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-700 font-mono"
+                  placeholder={DEFAULT_PROMPT}
+                />
+                <p className="mt-1 text-sm text-gray-500">留空则使用系统默认提示词</p>
+              </div>
+
               <div className="flex justify-end space-x-3">
-                <button
-                  type="button"
-                  onClick={() => setIsAddCategoryModalOpen(false)}
-                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isAddingCategory || !newCategoryName.trim()}
-                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md disabled:opacity-50"
-                >
-                  {isAddingCategory ? 'Adding...' : 'Add Category'}
+                <button type="button" onClick={() => setIsAddCategoryModalOpen(false)}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md">取消</button>
+                <button type="submit" disabled={isAddingCategory || !newCategoryName.trim() || !newCategorySysName.trim()}
+                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md disabled:opacity-50">
+                  {isAddingCategory ? '添加中...' : '添加分类'}
                 </button>
               </div>
             </form>
@@ -440,46 +440,49 @@ export default function CategoriesSettings() {
         </div>
       )}
 
-      {/* Edit Category Modal */}
+      {/* 编辑分类模态框 */}
       {isEditCategoryModalOpen && editingCategory && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full">
-            <h2 className="text-xl font-semibold mb-4 text-gray-900">Edit Category</h2>
-            
+            <h2 className="text-xl font-semibold mb-4 text-gray-900">编辑分类</h2>
+
             <form onSubmit={handleUpdateCategory}>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">分类名称</label>
+                <input type="text" value={editCategoryName}
+                  onChange={(e) => setEditCategoryName(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900" required />
+              </div>
+
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">系统名称</label>
+                <input type="text" value={editCategorySysName}
+                  onChange={(e) => setEditCategorySysName(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 font-mono text-sm" required />
+                <p className="mt-1 text-sm text-gray-500">建议英文大写+下划线，代码中引用使用</p>
+              </div>
+
               <div className="mb-6">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Category Name
+                  AI 提示词
+                  <span className="ml-1 text-xs text-gray-400 font-normal">（用于 AI 摘要）</span>
                 </label>
-                <input
-                  type="text"
-                  value={editCategoryName}
-                  onChange={(e) => setEditCategoryName(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
-                  required
+                <textarea value={editCategoryPrompt}
+                  onChange={(e) => setEditCategoryPrompt(e.target.value)}
+                  rows={6}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-700 font-mono"
+                  placeholder={DEFAULT_PROMPT}
                 />
-                <p className="mt-1 text-sm text-gray-500">
-                  System name will be automatically updated to: {editCategoryName ? editCategoryName.trim().toUpperCase().replace(/\s+/g, '_') : ''}
-                </p>
-                <p className="mt-1 text-sm text-gray-500">
-                  Current system name: <span className="font-medium">{editingCategory.name}</span>
-                </p>
+                <p className="mt-1 text-sm text-gray-500">留空则使用系统默认提示词</p>
               </div>
-              
+
               <div className="flex justify-end space-x-3">
-                <button
-                  type="button"
-                  onClick={closeEditModal}
-                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isEditingCategory || !editCategoryName.trim() || editCategoryName.trim() === editingCategory.label}
-                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md disabled:opacity-50"
-                >
-                  {isEditingCategory ? 'Updating...' : 'Update Category'}
+                <button type="button" onClick={closeEditModal}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md">取消</button>
+                <button type="submit"
+                  disabled={isEditingCategory || !editCategoryName.trim() || !editCategorySysName.trim()}
+                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md disabled:opacity-50">
+                  {isEditingCategory ? '更新中...' : '更新分类'}
                 </button>
               </div>
             </form>
@@ -487,26 +490,26 @@ export default function CategoriesSettings() {
         </div>
       )}
 
-      {/* Delete Category Confirmation Modal */}
+      {/* 删除分类确认模态框 */}
       {isDeleteCategoryModalOpen && deletingCategory && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full">
-            <h2 className="text-xl font-semibold mb-4 text-gray-900">Delete Category</h2>
-            
+            <h2 className="text-xl font-semibold mb-4 text-gray-900">删除分类</h2>
+
             <p className="text-gray-600 mb-2">
-              Are you sure you want to delete the category <span className="font-medium">{deletingCategory.label}</span>?
+              确定要删除分类 <span className="font-medium">{deletingCategory.label}</span> 吗？
             </p>
             <p className="text-sm text-gray-500 mb-6">
-              This action cannot be undone. If tasks are using this category, the deletion will fail.
+              此操作不可撤销。如有任务正在使用此分类，删除将失败。
             </p>
-            
+
             <div className="flex justify-end space-x-3">
               <button
                 type="button"
                 onClick={closeDeleteModal}
                 className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md"
               >
-                Cancel
+                取消
               </button>
               <button
                 type="button"
@@ -514,7 +517,7 @@ export default function CategoriesSettings() {
                 disabled={isDeletingCategory}
                 className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-md disabled:opacity-50"
               >
-                {isDeletingCategory ? 'Deleting...' : 'Delete Category'}
+                {isDeletingCategory ? '删除中...' : '删除分类'}
               </button>
             </div>
           </div>
@@ -522,4 +525,4 @@ export default function CategoriesSettings() {
       )}
     </div>
   );
-} 
+}

@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState, KeyboardEvent, useRef } from 'react';
-import { getAllTags, getAllTaskTypes, addTask } from '@/app/tasks/actions';
+import { useEffect, useState, useRef } from 'react';
+import { getAllTags, getAllTaskTypes, addTask, fetchParentTaskOptions } from '@/app/tasks/actions';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import { useTaskContext } from '@/app/lib/TaskContext';
@@ -19,8 +19,10 @@ interface Tag {
 }
 
 export default function TaskForm() {
-  const { triggerRefresh, showNotification } = useTaskContext();
+  const { triggerRefresh, showNotification, prefillParentId, setPrefillParentId } = useTaskContext();
+  const formRef = useRef<HTMLDivElement>(null);
   const [formData, setFormData] = useState({
+    name: '',
     description: '',
     type: '',
     tags: [] as string[],
@@ -28,14 +30,12 @@ export default function TaskForm() {
     link: ''
   });
 
-  const [tagInput, setTagInput] = useState('');
+  const [parentId, setParentId] = useState<string>('');
+  const [parentOptions, setParentOptions] = useState<{ id: string; name: string | null }[]>([]);
   const [allTags, setAllTags] = useState<Tag[]>([]);
-  const [matchingTags, setMatchingTags] = useState<Tag[]>([]);
   const [taskTypes, setTaskTypes] = useState<TaskType[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedTagIndex, setSelectedTagIndex] = useState(-1);
-  const tagListRef = useRef<HTMLUListElement>(null);
   const [automationRules, setAutomationRules] = useState<AutomationRule[]>([]);
 
   useEffect(() => {
@@ -43,10 +43,11 @@ export default function TaskForm() {
       setIsLoading(true);
       setError(null);
       try {
-        const [tags, types, rules] = await Promise.all([
+        const [tags, types, rules, parents] = await Promise.all([
           getAllTags(),
           getAllTaskTypes(),
-          getAutomationRules()
+          getAutomationRules(),
+          fetchParentTaskOptions()
         ]);
         setAllTags(tags);
         // Sort task types by sortOrder if available
@@ -62,11 +63,12 @@ export default function TaskForm() {
           
           return orderA - orderB;
         }));
+        setParentOptions(parents);
         setAutomationRules(rules);
       } catch (err) {
         console.error('Error loading form data:', err);
-        setError('Failed to load task types and tags. Please try again.');
-        showNotification('error', 'Failed to load task types and tags');
+        setError('加载分类和标签失败，请重试');
+        showNotification('error', '加载分类和标签失败');
       } finally {
         setIsLoading(false);
       }
@@ -74,23 +76,19 @@ export default function TaskForm() {
     fetchData();
   }, [showNotification]);
 
+  // Handle prefillParentId from context (when "add subtask" is clicked in TaskList)
   useEffect(() => {
-    if (tagInput.trim()) {
-      const matches = allTags.filter(
-        tag =>
-          tag.label.toLowerCase().includes(tagInput.toLowerCase()) &&
-          !formData.tags.includes(tag.name)
-      );
-      setMatchingTags(matches);
-      setSelectedTagIndex(-1); // Reset selection when input changes
-    } else {
-      setMatchingTags([]);
-      setSelectedTagIndex(-1);
+    if (prefillParentId) {
+      setParentId(prefillParentId);
+      // Scroll form into view
+      formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      // Clear the prefill after applying
+      setPrefillParentId(null);
     }
-  }, [tagInput, allTags, formData.tags]);
+  }, [prefillParentId, setPrefillParentId]);
 
   const handleInputChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
   ) => {
     const { name, value } = e.target;
     
@@ -139,76 +137,6 @@ export default function TaskForm() {
     }
   };
 
-  const handleTagInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setTagInput(e.target.value);
-  };
-
-  const handleTagKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      
-      // If there's a selected tag, add it
-      if (selectedTagIndex >= 0 && selectedTagIndex < matchingTags.length) {
-        addTag(matchingTags[selectedTagIndex].name);
-        return;
-      }
-      
-      // Otherwise, create a new tag from the input
-      if (tagInput.trim()) {
-        const newTag = tagInput.trim().toLowerCase().replace(/\s+/g, '-');
-        if (!formData.tags.includes(newTag)) {
-          setFormData(prev => ({
-            ...prev,
-            tags: [...prev.tags, newTag]
-          }));
-        }
-        setTagInput('');
-        setMatchingTags([]);
-        setSelectedTagIndex(-1);
-      }
-    } else if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setSelectedTagIndex(prev => 
-        prev < matchingTags.length - 1 ? prev + 1 : prev
-      );
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setSelectedTagIndex(prev => prev > 0 ? prev - 1 : -1);
-    } else if (e.key === 'Escape') {
-      setMatchingTags([]);
-      setSelectedTagIndex(-1);
-    }
-  };
-
-  // Scroll the selected item into view
-  useEffect(() => {
-    if (selectedTagIndex >= 0 && tagListRef.current) {
-      const selectedElement = tagListRef.current.children[selectedTagIndex] as HTMLElement;
-      if (selectedElement) {
-        selectedElement.scrollIntoView({ block: 'nearest' });
-      }
-    }
-  }, [selectedTagIndex]);
-
-  const addTag = (tagName: string) => {
-    if (!formData.tags.includes(tagName)) {
-      setFormData(prev => ({
-        ...prev,
-        tags: [...prev.tags, tagName]
-      }));
-    }
-    setTagInput('');
-    setMatchingTags([]);
-    setSelectedTagIndex(-1);
-  };
-
-  const removeTag = (tagToRemove: string) => {
-    setFormData(prev => ({
-      ...prev,
-      tags: prev.tags.filter(tag => tag !== tagToRemove)
-    }));
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
@@ -217,37 +145,37 @@ export default function TaskForm() {
     try {
       await addTask({
         ...formData,
+        parentId: parentId || undefined,
         date: formData.date.toISOString().split('T')[0]
       });
       
       // Reset form after successful submission
       setFormData({
+        name: '',
         description: '',
         type: '',
         tags: [],
         date: new Date(),
         link: ''
       });
+      setParentId('');
       // Trigger refresh of the task list
       triggerRefresh();
       // Show success notification instead of alert
-      showNotification('success', 'Task added successfully!');
+      showNotification('success', '任务添加成功！');
     } catch (err) {
       console.error('Error adding task:', err);
-      setError('Failed to add task. Please try again.');
+      setError('添加任务失败，请重试');
       // Show error notification
-      showNotification('error', 'Failed to add task. Please try again.');
+      showNotification('error', '添加任务失败，请重试');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const getTagLabel = (name: string) =>
-    allTags.find(t => t.name === name)?.label || name.replace(/-/g, ' ');
-
   return (
-    <div className="max-w-2xl mx-auto p-6 bg-white rounded-lg shadow-md">
-      <h2 className="text-2xl font-bold mb-6 text-gray-900">Add New Task</h2>
+    <div ref={formRef} className="max-w-2xl mx-auto p-6 bg-white rounded-lg shadow-md">
+      <h2 className="text-2xl font-bold mb-6 text-gray-900">添加新任务</h2>
       
       {error && (
         <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-md">
@@ -257,23 +185,60 @@ export default function TaskForm() {
       
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label htmlFor="description" className="block text-sm font-medium text-gray-800 mb-1">
-            Description
+          <label htmlFor="name" className="block text-sm font-medium text-gray-800 mb-1">
+            任务名称
           </label>
           <input
             type="text"
+            id="name"
+            name="name"
+            value={formData.name}
+            onChange={handleInputChange}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+            placeholder="输入任务名称"
+            disabled={isLoading}
+          />
+        </div>
+
+        <div>
+          <label htmlFor="description" className="block text-sm font-medium text-gray-800 mb-1">
+            描述
+          </label>
+          <textarea
             id="description"
             name="description"
             value={formData.description}
             onChange={handleInputChange}
+            rows={3}
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+            placeholder="输入详细描述（可选）"
             disabled={isLoading}
           />
         </div>
-        
+
+        <div>
+          <label htmlFor="parentId" className="block text-sm font-medium text-gray-800 mb-1">
+            父任务（可选）
+          </label>
+          <select
+            id="parentId"
+            value={parentId}
+            onChange={(e) => setParentId(e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+            disabled={isLoading || parentOptions.length === 0}
+          >
+            <option value="">无（顶级任务）</option>
+            {parentOptions.map(p => (
+              <option key={p.id} value={p.id}>
+                {p.name || '(未命名任务)'}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <div>
           <label htmlFor="type" className="block text-sm font-medium text-gray-800 mb-1">
-            Category
+            分类
           </label>
           <select
             id="type"
@@ -283,7 +248,7 @@ export default function TaskForm() {
             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
             disabled={isLoading || taskTypes.length === 0}
           >
-            <option value="">Select a category</option>
+            <option value="">选择分类</option>
             {taskTypes.map(type => (
               <option key={type.name} value={type.name}>
                 {type.label}
@@ -293,64 +258,38 @@ export default function TaskForm() {
         </div>
         
         <div>
-          <label htmlFor="tags" className="block text-sm font-medium text-gray-800 mb-1">
-            Tags
+          <label className="block text-sm font-medium text-gray-800 mb-1">
+            标签
           </label>
-          <div className="flex flex-wrap gap-2 mb-2">
-            {formData.tags.map(tag => (
-              <span 
-                key={tag} 
-                className="inline-flex items-center px-2 py-1 rounded-md text-sm font-medium bg-blue-100 text-blue-800"
-              >
-                {getTagLabel(tag)}
-                <button
-                  type="button"
-                  onClick={() => removeTag(tag)}
-                  className="ml-1 text-blue-600 hover:text-blue-800"
-                  disabled={isLoading}
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
-          <div className="relative">
-            <input
-              type="text"
-              id="tagInput"
-              value={tagInput}
-              onChange={handleTagInputChange}
-              onKeyDown={handleTagKeyDown}
-              placeholder="Type a tag and press Enter"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
-              disabled={isLoading}
-            />
-            {matchingTags.length > 0 && (
-              <ul 
-                ref={tagListRef}
-                className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-auto"
-              >
-                {matchingTags.map((tag, index) => (
-                  <li 
-                    key={tag.name}
-                    onClick={() => addTag(tag.name)}
-                    className={`px-3 py-2 cursor-pointer text-gray-900 ${
-                      index === selectedTagIndex 
-                        ? 'bg-blue-100 text-blue-800' 
-                        : 'hover:bg-gray-100'
-                    }`}
-                  >
-                    {tag.label}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+          {allTags.length === 0 ? (
+            <p className="text-sm text-gray-400">暂无标签，请先在设置中添加</p>
+          ) : (
+            <div className="border border-gray-300 rounded-md p-2 max-h-40 overflow-y-auto grid grid-cols-2 gap-1">
+              {allTags.map(tag => (
+                <label key={tag.name} className="flex items-center gap-2 px-1 py-1 rounded hover:bg-gray-50 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.tags.includes(tag.name)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setFormData(prev => ({ ...prev, tags: [...prev.tags, tag.name] }));
+                      } else {
+                        setFormData(prev => ({ ...prev, tags: prev.tags.filter(t => t !== tag.name) }));
+                      }
+                    }}
+                    disabled={isLoading}
+                    className="rounded text-blue-600"
+                  />
+                  <span className="text-sm text-gray-700">{tag.label}</span>
+                </label>
+              ))}
+            </div>
+          )}
         </div>
         
         <div>
           <label htmlFor="date" className="block text-sm font-medium text-gray-800 mb-1">
-            Date
+            日期
           </label>
           <DatePicker
             id="date"
@@ -365,7 +304,7 @@ export default function TaskForm() {
         
         <div>
           <label htmlFor="link" className="block text-sm font-medium text-gray-800 mb-1">
-            Link (Optional)
+            链接（可选）
           </label>
           <input
             type="url"
@@ -383,7 +322,7 @@ export default function TaskForm() {
           className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
           disabled={isLoading}
         >
-          {isLoading ? 'Submitting...' : 'Add Task'}
+          {isLoading ? '提交中...' : '添加任务'}
         </button>
       </form>
     </div>

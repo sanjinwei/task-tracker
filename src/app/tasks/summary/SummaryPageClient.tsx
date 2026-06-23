@@ -1,406 +1,672 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import AIChatBox from '@/app/components/AIChatBox';
-import CollapsibleText from '@/app/components/CollapsibleText';
 import ApiKeyCheck from '@/app/components/ApiKeyCheck';
-import { format } from 'date-fns';
-import { getOpenAIApiKey } from '@/app/settings/actions';
+import {
+  getOpenAIApiKey, getDeepSeekApiKey,
+} from '@/app/settings/actions';
+import {
+  getTaskById, getRelatedTasks, getAllParentTasksWithChildren, saveTaskReport,
+} from '@/app/tasks/actions';
 
-// Model options type
-type AIModel = 'lm-studio' | 'openai-gpt4o';
+type AIModel = 'lm-studio' | 'openai-gpt4o' | 'deepseek';
 
-// Environment variables (these will be loaded by Next.js at build time)
-const LM_STUDIO_API_ENDPOINT = process.env.NEXT_PUBLIC_LM_STUDIO_API_ENDPOINT || 'http://localhost:1234/v1/chat/completions';
-const OPENAI_API_ENDPOINT = process.env.NEXT_PUBLIC_OPENAI_API_ENDPOINT || 'https://api.openai.com/v1/chat/completions';
+const DEFAULT_PROMPT = `你是一个专业的工作报告撰写助手。请基于以下信息，为当前任务生成一份简洁的进度报告。
 
-export default function SummaryPageClient({
-  initialTextReport,
-}: {
-  initialTextReport: string;
-}) {
-  const [plainTextReport, setPlainTextReport] = useState(initialTextReport);
-  const [aiResponse, setAIResponse] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [feedbackLoading, setFeedbackLoading] = useState(false);
-  const [feedbackError, setFeedbackError] = useState<string | null>(null);
-  const [previousFeedback, setPreviousFeedback] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [selectedModel, setSelectedModel] = useState<AIModel>('openai-gpt4o');
-  const [openAIApiKey, setOpenAIApiKey] = useState<string>('');
-  
-  const [aiPrompt, setAiPrompt] = useState(`You are a helpful assistant summarizing a work report for an HR self-feedback draft.
-
-Here are the activities:
 %TASK_SUMMARY%
 
-Generate a short summary paragraph in first-person voice, organized into the following sections:
-- Summary
-- Growth
-- Achievements
-- Future Goals`);
-  
-  // Fetch the OpenAI API key from the Settings table
+请生成一份结构化的报告，包含以下内容：
+1. 任务概述
+2. 关键进展
+3. 遇到的问题与解决方案
+4. 下一步计划`;
+
+const PARENT_HINT = '\n\n注意：此任务是一个父任务（项目），请重点关注此项目的主要内容概述以及各个子任务的完成情况汇总。';
+const CHILD_HINT = '\n\n注意：此任务是一个子任务（进度条目），请主要聚焦于此任务本身的具体内容和工作产出。';
+
+// --- Types for related tasks ---
+interface RelatedTask {
+  id: string;
+  name: string | null;
+  description: string | null;
+  report: string | null;
+  date: Date;
+  type: { name: string; label: string } | null;
+  tags: { tag: { name: string; label: string } }[];
+}
+
+interface TaskPickerItem {
+  id: string;
+  name: string | null;
+  children: { id: string; name: string | null; date: Date }[];
+}
+
+// --- Types for current task ---
+interface CurrentTask {
+  id: string;
+  name: string | null;
+  description: string | null;
+  report: string | null;
+  parentId: string | null;
+  parent: { id: string; name: string | null; description: string | null } | null;
+  children: RelatedTask[];
+}
+
+export default function SummaryPageClient({ taskId, from }: { taskId?: string; from?: string }) {
+  // AI state
+  const [selectedModel, setSelectedModel] = useState<AIModel>('openai-gpt4o');
+  const [aiResponse, setAIResponse] = useState<string | null>(null);
+  const selectedModelRef = useRef<AIModel>('openai-gpt4o');
+  useEffect(() => { selectedModelRef.current = selectedModel; }, [selectedModel]);
+
+  // Current task state
+  const [currentTask, setCurrentTask] = useState<CurrentTask | null>(null);
+  const [taskLoading, setTaskLoading] = useState(false);
+
+  // Related tasks state
+  const [relatedTasks, setRelatedTasks] = useState<RelatedTask[]>([]);
+  const [showTaskPicker, setShowTaskPicker] = useState(false);
+  const [taskPickerData, setTaskPickerData] = useState<TaskPickerItem[]>([]);
+  const [pickerLoading, setPickerLoading] = useState(false);
+
+  // Related files state
+  const [relatedFiles, setRelatedFiles] = useState<{ name: string; content: string }[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Save state
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+
+  // AI response editing
+  const [editableResponse, setEditableResponse] = useState<string>('');
+  const [isEditingResponse, setIsEditingResponse] = useState(false);
+
+  // AI Prompt (set dynamically when task loads)
+  const [aiPrompt, setAiPrompt] = useState('');
+
+  // Child report summaries: childId → one-sentence summary (Plan A: summarize before parent)
+  const [childSummaries, setChildSummaries] = useState<Record<string, string>>({});
+  const [summarizing, setSummarizing] = useState(false);
+  const [summarizeProgress, setSummarizeProgress] = useState('');
+
+  // Fetch API keys and auto-select model
   useEffect(() => {
-    const fetchOpenAIApiKey = async () => {
+    const fetchApiKeys = async () => {
       try {
-        const { value } = await getOpenAIApiKey();
-        setOpenAIApiKey(value || '');
-      } catch (error) {
-        console.error('Error fetching OpenAI API key:', error);
+        const { value: openAIKey } = await getOpenAIApiKey();
+        const { value: dsKey } = await getDeepSeekApiKey();
+
+        const hasOpenAI = openAIKey && openAIKey.trim() !== '';
+        const hasDeepSeek = dsKey && dsKey.trim() !== '';
+        if (hasOpenAI) setSelectedModel('openai-gpt4o');
+        else if (hasDeepSeek) setSelectedModel('deepseek');
+        else setSelectedModel('lm-studio');
+      } catch (err) {
+        console.error('Error fetching API keys:', err);
       }
     };
-    
-    fetchOpenAIApiKey();
+    fetchApiKeys();
   }, []);
-  
-  // Handle edits to the task summary content
-  const handleContentEdit = (newContent: string) => {
-    setPlainTextReport(newContent);
-  };
 
-  // Handle prompt edits
-  const handlePromptEdit = (newPrompt: string) => {
-    setAiPrompt(newPrompt);
-  };
+  // Load current task and related tasks
+  useEffect(() => {
+    if (!taskId) return;
+    const loadTaskData = async () => {
+      setTaskLoading(true);
+      // Immediately clear previous AI response when switching tasks
+      setAIResponse(null);
+      setEditableResponse('');
+      try {
+        const task = await getTaskById(taskId);
+        if (task) {
+          setCurrentTask(task as unknown as CurrentTask);
 
-  // Handle AI response
-  const handleAIResponse = (response: string) => {
-    setAIResponse(response);
-  };
+          // Determine AI prompt based on category and parent/child status
+          let prompt = DEFAULT_PROMPT;
+          const typePrompt = (task as Record<string, unknown>).type as { prompt?: string } | null;
+          if (typePrompt?.prompt) {
+            prompt = typePrompt.prompt;
+          }
 
-  // Handle loading state
-  const handleLoadingState = (loading: boolean) => {
-    setIsLoading(loading);
-  };
+          // Add parent/child specific hints
+          const isParent = !task.parentId;
+          const hasChildren = task.children && task.children.length > 0;
+          if (isParent && hasChildren) {
+            prompt += PARENT_HINT;
+          } else if (!isParent) {
+            prompt += CHILD_HINT;
+          }
 
-  // Handle model selection change
-  const handleModelChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setSelectedModel(e.target.value as AIModel);
-  };
+          setAiPrompt(prompt);
 
-  // Handle file selection
-  const handleFileSelect = () => {
-    fileInputRef.current?.click();
-  };
+          // Load related tasks
+          const related = await getRelatedTasks(taskId);
+          setRelatedTasks(related as unknown as RelatedTask[]);
 
-  // Process uploaded file
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+          // Plan A: Auto-summarize child reports for parent tasks
+          if (isParent && hasChildren) {
+            setSummarizing(true);
+            const children = (task as unknown as CurrentTask).children || [];
+            const childrenWithReports = children.filter(c => c.report);
+            const newSummaries: Record<string, string> = {};
+            for (let i = 0; i < childrenWithReports.length; i++) {
+              const child = childrenWithReports[i];
+              setSummarizeProgress(`正在为子任务生成摘要 (${i + 1}/${childrenWithReports.length}): ${child.name}`);
+              try {
+                const summary = await summarizeChildReport(child.report!, selectedModelRef.current);
+                newSummaries[child.id] = summary;
+              } catch { /* skip failed summarizations */ }
+            }
+            setChildSummaries(newSummaries);
+            setSummarizing(false);
+            setSummarizeProgress('');
+          }
+        }
+      } catch (err) {
+        console.error('Error loading task:', err);
+      } finally {
+        setTaskLoading(false);
+        setSummarizing(false);
+      }
+    };
+    loadTaskData();
+  }, [taskId]);
 
-    // Validate file type
-    if (!file.name.endsWith('.md')) {
-      setFeedbackError('Please upload a Markdown (.md) file');
-      return;
-    }
-
-    setFeedbackLoading(true);
-    setFeedbackError(null);
-
+  // Load task picker data when modal opens
+  const openTaskPicker = async () => {
+    setShowTaskPicker(true);
+    setPickerLoading(true);
     try {
-      // Read the file content
-      const fileContent = await readFileContent(file);
-      
-      // Parse and clean the markdown content
-      const parsedContent = fileContent.trim();
-      
-      // Call API to summarize previous feedback
-      const summarizedFeedback = await summarizePreviousFeedback(parsedContent);
-      
-      // Update the AI prompt to include the previous feedback summary
-      const updatedPrompt = `You are a helpful assistant summarizing a work report for an HR self-feedback draft.
-
-Here are the activities:
-%TASK_SUMMARY%
-
-Here is a brief summary of my previous HR feedback, to use as context:
-%SUMMARIZED_PREVIOUS_FEEDBACK%
-
-Generate a short summary paragraph in first-person voice, organized into the following sections:
-- Summary
-- Growth
-- Achievements
-- Future Goals`;
-
-      setAiPrompt(updatedPrompt);
-
-      // Keep track of the feedback separately
-      setPreviousFeedback(summarizedFeedback);
-
-    } catch (error) {
-      console.error('Error processing feedback file:', error);
-      setFeedbackError('Failed to process the feedback file. Please try again.');
+      const data = await getAllParentTasksWithChildren();
+      setTaskPickerData(data as unknown as TaskPickerItem[]);
+    } catch (err) {
+      console.error('Error loading task picker:', err);
     } finally {
-      setFeedbackLoading(false);
-      // Reset file input
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
+      setPickerLoading(false);
+    }
+  };
+
+  const addRelatedTask = (task: { id: string; name: string | null }) => {
+    if (relatedTasks.some(t => t.id === task.id)) return;
+    // Add as a minimal related task entry (report comes from AI)
+    setRelatedTasks(prev => [...prev, {
+      id: task.id,
+      name: task.name,
+      description: null,
+      report: null,
+      date: new Date(),
+      type: null,
+      tags: [],
+    }]);
+  };
+
+  const removeRelatedTask = (taskId: string) => {
+    setRelatedTasks(prev => prev.filter(t => t.id !== taskId));
+  };
+
+  // File handling
+  const handleFileSelect = () => fileInputRef.current?.click();
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      try {
+        const content = await readFileContent(file);
+        setRelatedFiles(prev => [...prev, { name: file.name, content }]);
+      } catch (err) {
+        console.error('Error reading file:', err);
       }
     }
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  // Read file content as text
   const readFileContent = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          resolve(event.target.result as string);
-        } else {
-          reject(new Error('Failed to read file content'));
-        }
+      reader.onload = (e) => {
+        if (e.target?.result) resolve(e.target.result as string);
+        else reject(new Error('读取文件内容失败'));
       };
-      reader.onerror = () => reject(new Error('File reading error'));
+      reader.onerror = () => reject(new Error('文件读取错误'));
       reader.readAsText(file);
     });
   };
 
-  // Summarize previous feedback using AI
-  const summarizePreviousFeedback = async (text: string): Promise<string> => {
-    const prompt = `You are a system that extracts key points from HR performance review self-assessment feedback.
-Here is the previous feedback document:
-${text}
+  const removeFile = (idx: number) => {
+    setRelatedFiles(prev => prev.filter((_, i) => i !== idx));
+  };
 
-Your task is to extract the most important points and areas of focus from this feedback, in a very concise bullet point format.
-Focus on:
-- Areas mentioned for improvement
-- Key achievements and strengths
-- Any specific goals mentioned
-
-Keep your response under 150 words total, focusing only on the most important information.`;
-
+  // Summarize a child's report into one sentence
+  const summarizeChildReport = async (report: string, model: AIModel): Promise<string> => {
     try {
-      const endpoint = selectedModel === 'lm-studio' ? LM_STUDIO_API_ENDPOINT : OPENAI_API_ENDPOINT;
-      const headers: HeadersInit = {
-        'Content-Type': 'application/json',
-      };
-      
-      // Add authentication for OpenAI
-      if (selectedModel === 'openai-gpt4o') {
-        if (!openAIApiKey) {
-          throw new Error('OpenAI API key is missing');
-        }
-        headers['Authorization'] = `Bearer ${openAIApiKey}`;
-      }
-      
-      // Prepare the body based on the selected model
-      let body;
-      if (selectedModel === 'lm-studio') {
-        body = JSON.stringify({
-          model: 'meta-llama-3.1-8b-instruct',
-          messages: [
-            {
-              role: 'user',
-              content: prompt
-            }
-          ],
-          temperature: 0.7,
-        });
+      // Read API config from settings
+      let endpoint = '';
+      let apiKey = '';
+      let modelName = 'gpt-4o';
+
+      if (model === 'lm-studio') {
+        const { value } = await import('@/app/settings/actions').then(m => m.getLMStudioEndpoint());
+        endpoint = value || 'http://localhost:1234/v1/chat/completions';
+        modelName = 'meta-llama-3.1-8b-instruct';
+      } else if (model === 'deepseek') {
+        const [epRes, keyRes] = await Promise.all([
+          import('@/app/settings/actions').then(m => m.getDeepSeekEndpoint()),
+          import('@/app/settings/actions').then(m => m.getDeepSeekApiKey()),
+        ]);
+        endpoint = epRes.value || 'https://api.deepseek.com/v1/chat/completions';
+        apiKey = keyRes.value || '';
+        modelName = 'deepseek-chat';
       } else {
-        body = JSON.stringify({
-          model: 'gpt-4o',
-          messages: [
-            {
-              role: 'user',
-              content: prompt
-            }
-          ],
-          temperature: 0.7,
-        });
+        const [epRes, keyRes] = await Promise.all([
+          import('@/app/settings/actions').then(m => m.getOpenAIEndpoint()),
+          import('@/app/settings/actions').then(m => m.getOpenAIApiKey()),
+        ]);
+        endpoint = epRes.value || 'https://api.openai.com/v1/chat/completions';
+        apiKey = keyRes.value || '';
+        modelName = 'gpt-4o';
       }
-      
-      const response = await fetch(endpoint, {
+
+      if (!apiKey && model !== 'lm-studio') throw new Error('No API key');
+
+      const resp = await fetch('/api/ai/chat', {
         method: 'POST',
-        headers,
-        body,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          endpoint, apiKey, model: modelName,
+          messages: [{ role: 'user', content: `请用3-5句话总结以下报告的核心内容。要求：保留所有重要细节、关键数据、特殊要求和未完成事项，不要省略任何明确写出的要求。\n\n${report.substring(0, 2500)}` }],
+        }),
       });
-      
-      if (!response.ok) {
-        throw new Error(`API request failed with status ${response.status}`);
-      }
-      
-      const data = await response.json();
-      return data.choices[0]?.message?.content.trim() || 'No response from AI';
-    } catch (error) {
-      console.error(`Error calling ${selectedModel} API for feedback summarization:`, error);
-      throw new Error(`Failed to summarize previous feedback using ${selectedModel}`);
+      if (!resp.ok) throw new Error('Summarize failed');
+      const data = await resp.json();
+      return data.choices?.[0]?.message?.content?.trim() || '(摘要生成失败)';
+    } catch {
+      return report.substring(0, 100) + '...(摘要失败)';
     }
   };
 
-  // Handle downloading the AI response as markdown
-  const handleDownload = () => {
-    if (!aiResponse) return;
-    
-    // Create filename with current date
-    const currentDate = format(new Date(), 'yyyy-MM-dd');
-    const filename = `ai-summary-${currentDate}.md`;
-    
-    // Create the markdown content
-    const markdownContent = `# AI Summary - ${currentDate}\n\n${aiResponse}`;
-    
-    // Create a blob for download
-    const blob = new Blob([markdownContent], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    
-    // Create a download link and trigger click
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    
-    // Clean up
-    URL.revokeObjectURL(url);
-    document.body.removeChild(a);
+  // Compute effective related tasks: for parent, use children from getTaskById;
+  // for child, use siblings from getRelatedTasks; also merge manually added tasks
+  const effectiveRelatedTasks = useMemo(() => {
+    const autoTasks: RelatedTask[] = [];
+
+    if (currentTask) {
+      const isParent = !currentTask.parentId;
+      if (isParent && currentTask.children) {
+        // Parent task: use its children as related tasks
+        autoTasks.push(...currentTask.children);
+      } else if (relatedTasks.length > 0) {
+        // Child task: use siblings from getRelatedTasks
+        autoTasks.push(...relatedTasks);
+      }
+    }
+
+    // Merge with manually added tasks (deduplicate by id)
+    const allIds = new Set(autoTasks.map(t => t.id));
+    const manualTasks = relatedTasks.filter(t => !allIds.has(t.id));
+
+    return [...autoTasks, ...manualTasks];
+  }, [currentTask, relatedTasks]);
+
+  // Build combined context for AI prompt
+  const buildFullContext = (): string => {
+    const parts: string[] = [];
+
+    // Current task
+    parts.push('## 当前任务');
+    if (currentTask) {
+      parts.push(`- 任务名称: ${currentTask.name || '(未命名)'}`);
+      if (currentTask.description) parts.push(`- 描述: ${currentTask.description}`);
+      if (currentTask.report) parts.push(`- 已有报告: ${currentTask.report}`);
+    } else {
+      parts.push('(无)');
+    }
+
+    // Related tasks (use effective set that includes auto-loaded + manually added)
+    parts.push('\n## 相关任务');
+    if (effectiveRelatedTasks.length === 0) {
+      parts.push('(无)');
+    } else {
+      effectiveRelatedTasks.forEach(t => {
+        let text = `- ${t.name || '(未命名)'}`;
+        if (t.description) text += ` | 描述: ${t.description}`;
+        // Use pre-generated summary if available, with truncated original as fallback
+        const summary = childSummaries[t.id];
+        if (t.report && summary) {
+          text += ` | 报告摘要: ${summary}`;
+          // Also include first 150 chars of original as safety net
+          if (t.report.length > 150) {
+            text += ` | 原文首段: ${t.report.substring(0, 150)}...`;
+          }
+        } else if (t.report) {
+          text += ` | 报告: ${t.report.substring(0, 400)}`;
+        }
+        parts.push(text);
+      });
+    }
+
+    // Related files
+    parts.push('\n## 相关文件');
+    if (relatedFiles.length === 0) {
+      parts.push('(无)');
+    } else {
+      relatedFiles.forEach(f => {
+        parts.push(`### 文件: ${f.name}`);
+        parts.push(f.content.substring(0, 3000));
+      });
+    }
+
+    return parts.join('\n');
+  };
+
+  const handleSendToAI = (response: string) => {
+    setAIResponse(response);
+    setEditableResponse(response);
+  };
+
+  // Reset AI response when context changes (user must re-generate after changes)
+  const fullContext = buildFullContext();
+  const contextRef = useRef(fullContext);
+  useEffect(() => {
+    if (contextRef.current !== fullContext && aiResponse) {
+      setAIResponse(null);
+      setEditableResponse('');
+    }
+    contextRef.current = fullContext;
+  }, [fullContext, aiResponse]);
+
+  // Save report to current task
+  const handleSaveReport = async () => {
+    if (!taskId || !editableResponse) return;
+    setSaving(true);
+    setSaveMessage(null);
+    try {
+      const result = await saveTaskReport(taskId, editableResponse);
+      setSaveMessage(result.message);
+    } catch {
+      setSaveMessage('保存失败');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
     <main className="min-h-screen bg-gray-50">
       <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
-        <div className="mb-6">
-          <Link
-            href="/tasks"
-            className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
-          >
+
+        {/* Header */}
+        <div className="sticky top-0 z-10 bg-gray-50 pb-4 flex justify-between items-center mb-6">
+          <Link href={from === 'report' ? '/report' : '/tasks'}
+            className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
               <path fillRule="evenodd" d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z" clipRule="evenodd" />
             </svg>
-            Back to Tasks
+            {from === 'report' ? '返回报告' : '返回任务'}
           </Link>
+
+          <div className="flex items-center gap-2">
+            <Link href="/tasks"
+              className="inline-flex items-center px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
+              Home
+            </Link>
+            <a href="/settings" className="text-gray-500 hover:text-gray-900 p-2 rounded-full hover:bg-gray-100 transition-colors" title="设置">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
+              </svg>
+            </a>
+          </div>
         </div>
 
         <div className="space-y-6">
-          {/* API Key Check */}
           <ApiKeyCheck />
-          
-          {/* AI Model Selection Dropdown */}
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-4">
-            <h2 className="text-lg font-semibold text-gray-900 mb-3">AI Model Selection</h2>
+
+          {/* Current Task Info */}
+          {taskId && (
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+              <h2 className="text-lg font-semibold text-gray-900 mb-2">当前任务</h2>
+              {taskLoading ? (
+                <p className="text-gray-400 text-sm">加载中...</p>
+              ) : currentTask ? (
+                <div>
+                  <p className="font-medium text-gray-800">{currentTask.name || '(未命名)'}</p>
+                  {currentTask.description && <p className="text-sm text-gray-500 mt-1">{currentTask.description}</p>}
+                  {currentTask.parent && (
+                    <p className="text-xs text-gray-400 mt-1">
+                      所属项目：{currentTask.parent.name || '(未命名)'}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p className="text-gray-400 text-sm">未选择任务</p>
+              )}
+            </div>
+          )}
+
+          {/* Summarizing progress indicator */}
+          {summarizing && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-center gap-3">
+              <svg className="animate-spin h-5 w-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+              </svg>
+              <p className="text-sm text-blue-700">{summarizeProgress}</p>
+            </div>
+          )}
+
+          {/* AI Model Selection */}
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+            <h2 className="text-lg font-semibold text-gray-900 mb-3">AI 模型选择</h2>
             <div className="max-w-xs">
-              <label htmlFor="model-selector" className="block text-sm font-medium text-gray-700 mb-1">
-                Select AI Model
-              </label>
               <select
-                id="model-selector"
                 value={selectedModel}
-                onChange={handleModelChange}
-                className="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-purple-500 focus:border-purple-500 sm:text-sm rounded-md text-gray-900"
+                onChange={(e) => setSelectedModel(e.target.value as AIModel)}
+                className="block w-full pl-3 pr-10 py-2 text-base border-gray-300 rounded-md text-gray-900"
               >
-                <option value="lm-studio" className="text-gray-900">LM Studio</option>
-                <option value="openai-gpt4o" className="text-gray-900">OpenAI (GPT-4o)</option>
+                <option value="lm-studio">LM Studio</option>
+                <option value="openai-gpt4o">OpenAI (GPT-4o)</option>
+                <option value="deepseek">DeepSeek (deepseek-chat)</option>
               </select>
-              <p className="mt-2 text-sm text-gray-500">
-                Choose the AI model you want to use for generating summaries.
-              </p>
             </div>
           </div>
 
           {/* AI Chat Box */}
           <AIChatBox
             prompt={aiPrompt}
-            content={plainTextReport || 'No tasks found for the current reporting period.'}
-            previousFeedback={previousFeedback}
-            onEdit={handleContentEdit}
-            onPromptEdit={handlePromptEdit}
-            onSendToAI={handleAIResponse}
-            onLoadingStateChange={handleLoadingState}
+            content={fullContext}
+            previousFeedback={null}
+            onEdit={() => {}}
+            onPromptEdit={setAiPrompt}
+            onSendToAI={handleSendToAI}
             selectedModel={selectedModel}
           />
 
-          {/* Previous Feedback File Upload Section */}
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-4">
-            <h2 className="text-lg font-semibold text-gray-900 mb-3">Upload Previous HR Self-Feedback</h2>
-            <p className="text-sm text-gray-600 mb-4">
-              Upload a previous HR self-feedback .md file to include as context in your new summary (optional)
-            </p>
-            
-            <div className="flex items-center space-x-3">
+          {/* AI Response Display */}
+          {aiResponse && (
+            <div className="bg-white rounded-lg shadow-sm border border-purple-200 p-4">
+              <div className="flex justify-between items-center mb-3">
+                <h2 className="text-lg font-semibold text-gray-900">AI 生成报告</h2>
+                <button
+                  onClick={() => setIsEditingResponse(!isEditingResponse)}
+                  className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                >
+                  {isEditingResponse ? '完成编辑' : '修改'}
+                </button>
+              </div>
+              {isEditingResponse ? (
+                <textarea
+                  value={editableResponse}
+                  onChange={(e) => setEditableResponse(e.target.value)}
+                  className="w-full min-h-[300px] p-4 border border-gray-300 rounded-md text-gray-800 text-sm leading-relaxed focus:ring-2 focus:ring-blue-500"
+                />
+              ) : (
+                <div className="bg-gray-50 rounded-md p-4 max-h-96 overflow-y-auto">
+                  <div className="text-gray-800 whitespace-pre-wrap text-sm leading-relaxed">
+                    {editableResponse}
+                  </div>
+                </div>
+              )}
+              {taskId && (
+                <div className="flex items-center gap-3 mt-4 pt-3 border-t border-gray-200">
+                  <button
+                    onClick={() => handleSaveReport()}
+                    disabled={saving}
+                    className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md hover:bg-green-700 disabled:opacity-50"
+                  >
+                    {saving ? '保存中...' : '保存为当前任务报告'}
+                  </button>
+                  {saveMessage && (
+                    <span className={`text-sm ${saveMessage.includes('成功') ? 'text-green-600' : 'text-red-600'}`}>
+                      {saveMessage}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Related Tasks */}
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+            <div className="flex justify-between items-center mb-3">
+              <h2 className="text-lg font-semibold text-gray-900">相关任务</h2>
+              <button
+                onClick={openTaskPicker}
+                className="flex items-center justify-center w-8 h-8 rounded-full bg-purple-100 text-purple-600 hover:bg-purple-200"
+                title="添加相关任务"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
+                </svg>
+              </button>
+            </div>
+            {effectiveRelatedTasks.length === 0 ? (
+              <p className="text-gray-400 text-sm">暂无相关任务，点击 + 添加</p>
+            ) : (
+              <div className="space-y-2">
+                {effectiveRelatedTasks.map(t => {
+                  const isAuto = currentTask?.children?.some(c => c.id === t.id);
+                  return (
+                  <div key={t.id} className="flex items-center justify-between bg-gray-50 rounded-md p-2">
+                    <div>
+                      <span className="text-sm font-medium text-gray-700">{t.name || '(未命名)'}</span>
+                      {t.description && <span className="text-xs text-gray-500 ml-2">- {t.description}</span>}
+                      {t.report && <span className="text-xs text-green-600 ml-2">[已有报告]</span>}
+                      {isAuto && <span className="text-xs text-blue-500 ml-2">[自动]</span>}
+                    </div>
+                    {!isAuto && (
+                      <button onClick={() => removeRelatedTask(t.id)}
+                        className="text-gray-400 hover:text-red-500">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+              </div>
+            )}
+          </div>
+
+          {/* Related Files */}
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+            <div className="flex justify-between items-center mb-3">
+              <h2 className="text-lg font-semibold text-gray-900">相关文件</h2>
+              <button
+                onClick={handleFileSelect}
+                className="flex items-center justify-center w-8 h-8 rounded-full bg-blue-100 text-blue-600 hover:bg-blue-200"
+                title="添加文件"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
+                </svg>
+              </button>
               <input
                 type="file"
                 ref={fileInputRef}
                 onChange={handleFileUpload}
-                accept=".md"
                 className="hidden"
+                multiple
+                accept=".md,.txt,.js,.ts,.tsx,.jsx,.py,.json,.yaml,.yml,.css,.html"
               />
-              <button
-                onClick={handleFileSelect}
-                disabled={feedbackLoading}
-                className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-purple-600 border border-transparent rounded-md hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clipRule="evenodd" />
-                </svg>
-                {feedbackLoading ? 'Processing...' : 'Upload Previous Feedback'}
-              </button>
             </div>
-            
-            {feedbackLoading && (
-              <div className="mt-3 flex items-center text-sm text-gray-600">
-                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-purple-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                Summarizing previous feedback...
-              </div>
-            )}
-            
-            {feedbackError && (
-              <div className="mt-3 text-sm text-red-600">
-                {feedbackError}
-              </div>
-            )}
-            
-            {previousFeedback && !feedbackLoading && !feedbackError && (
-              <div className="mt-3 p-3 bg-gray-50 rounded-md">
-                <div className="text-sm font-medium text-gray-700 mb-1">Previous Feedback Summary:</div>
-                <div className="text-sm text-gray-600 whitespace-pre-wrap">
-                  {previousFeedback}
-                </div>
+            {relatedFiles.length === 0 ? (
+              <p className="text-gray-400 text-sm">暂无文件，点击 + 上传相关文档或代码文件</p>
+            ) : (
+              <div className="space-y-2">
+                {relatedFiles.map((f, idx) => (
+                  <div key={idx} className="flex items-center justify-between bg-gray-50 rounded-md p-2">
+                    <div className="flex items-center gap-2">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
+                      </svg>
+                      <span className="text-sm text-gray-700">{f.name}</span>
+                      <span className="text-xs text-gray-400">({f.content.length} 字符)</span>
+                    </div>
+                    <button onClick={() => removeFile(idx)}
+                      className="text-gray-400 hover:text-red-500">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
           </div>
+        </div>
 
-          {/* Show AI Response if available, otherwise show Plain Text Summary */}
-          <div className="bg-white rounded-lg shadow">
-            <div className="px-4 py-5 sm:p-6">
+        {/* Task Picker Modal */}
+        {showTaskPicker && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-lg p-6 max-w-lg w-full max-h-[80vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-4">
-                <h2 className="text-lg font-semibold text-gray-900">
-                  {isLoading ? 'AI Summary Response' : (aiResponse ? 'AI Summary Response' : 'Plain Text Summary')}
-                </h2>
-                {aiResponse && !isLoading && (
-                  <button
-                    onClick={handleDownload}
-                    className="inline-flex items-center px-3 py-1.5 text-sm font-medium text-white bg-green-600 border border-transparent rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clipRule="evenodd" />
-                    </svg>
-                    Download as Markdown
-                  </button>
-                )}
+                <h2 className="text-xl font-semibold text-gray-900">选择相关任务</h2>
+                <button onClick={() => setShowTaskPicker(false)} className="text-gray-400 hover:text-gray-600">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
               </div>
-              {isLoading ? (
-                <div className="flex items-center justify-center py-8">
-                  <div className="flex flex-col items-center space-y-4">
-                    <svg className="animate-spin h-8 w-8 text-purple-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    <p className="text-gray-600">AI is processing your request...</p>
-                  </div>
-                </div>
+              {pickerLoading ? (
+                <p className="text-gray-500">加载中...</p>
               ) : (
-                <CollapsibleText 
-                  text={aiResponse || plainTextReport || 'No tasks found for the current reporting period.'} 
-                  collapsible={!aiResponse}
-                />
+                <div className="space-y-3">
+                  {taskPickerData.map(parent => (
+                    <div key={parent.id}>
+                      <button
+                        onClick={() => addRelatedTask(parent)}
+                        className="w-full text-left px-3 py-2 rounded font-medium text-gray-800 hover:bg-blue-50"
+                        disabled={relatedTasks.some(t => t.id === parent.id)}
+                      >
+                        {parent.name || '(未命名项目)'}
+                        {relatedTasks.some(t => t.id === parent.id) && <span className="text-xs text-green-600 ml-2">已添加</span>}
+                      </button>
+                      {parent.children.length > 0 && (
+                        <div className="ml-4 border-l-2 border-gray-100 pl-3 space-y-1">
+                          {parent.children.map(child => (
+                            <button
+                              key={child.id}
+                              onClick={() => addRelatedTask(child)}
+                              className="w-full text-left px-3 py-1.5 rounded text-sm text-gray-600 hover:bg-gray-50"
+                              disabled={relatedTasks.some(t => t.id === child.id)}
+                            >
+                              {child.name || '(未命名)'}
+                              {relatedTasks.some(t => t.id === child.id) && <span className="text-xs text-green-600 ml-2">已添加</span>}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           </div>
-        </div>
+        )}
       </div>
     </main>
   );
-} 
+}

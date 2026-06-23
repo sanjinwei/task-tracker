@@ -24,13 +24,13 @@ async function main() {
     
     // Seed task types with alphabetical ordering
     const taskTypes = [
-      { name: 'COMMUNICATION', label: 'Communication', sortOrder: 0 },
-      { name: 'DOCUMENTATION', label: 'Documentation', sortOrder: 1 },
-      { name: 'LEARNING', label: 'Learning', sortOrder: 2 },
-      { name: 'MANUAL_REVIEW_WORK', label: 'Manual Review Work', sortOrder: 3 },
-      { name: 'OTHERS', label: 'Others', sortOrder: 4 },
-      { name: 'PROJECT', label: 'Project', sortOrder: 5 },
-      { name: 'SQUAD', label: 'Compliance Squad Work', sortOrder: 6 }
+      { name: 'COMMUNICATION', label: '沟通协作', sortOrder: 0 },
+      { name: 'DOCUMENTATION', label: '文档编写', sortOrder: 1 },
+      { name: 'LEARNING', label: '学习成长', sortOrder: 2 },
+      { name: 'MANUAL_REVIEW_WORK', label: '人工审核工作', sortOrder: 3 },
+      { name: 'OTHERS', label: '其他', sortOrder: 4 },
+      { name: 'PROJECT', label: '项目开发', sortOrder: 5 },
+      { name: 'SQUAD', label: '合规小组工作', sortOrder: 6 }
     ];
     
     // Insert each task type individually
@@ -43,34 +43,34 @@ async function main() {
     // Seed tags
     await prisma.tag.createMany({
       data: [
-        { name: 'slack-ping', label: 'Slack Ping' },
-        { name: 'ticket', label: 'Ticket' },
-        { name: 'gut-check', label: 'Gut Check' },
-        { name: 'p2-post', label: 'P2 Post' },
-        { name: 'p2-discussion', label: 'P2 Discussion' },
-        { name: 'slack-discussion', label: 'Slack Discussion' },
-        { name: 'team-call', label: 'Team Call' },
-        { name: '1-1', label: '1:1' },
-        { name: 'internal-tools', label: 'Internal Tools' },
-        { name: 'workflow-improvement', label: 'Workflow Improvement' },
-        { name: 'buddying', label: 'Buddying' },
-        { name: 'tool-exploration', label: 'Tool Exploration' },
-        { name: 'deep-dive', label: 'Deep Dive' },
-        { name: 'shared-insight', label: 'Shared Insight' },
-        { name: 'fraud-pattern', label: 'Fraud Pattern' },
-        { name: 'webinar', label: 'Webinar' },
-        { name: 'e-learning', label: 'e-Learning' },
-        { name: 'coaching', label: 'Coaching' },
-        { name: 'reading', label: 'Reading' },
-        { name: 'fu-update', label: 'Fraudsquad University Update' },
-        { name: 'survey', label: 'Survey' },
-        { name: 'admin', label: 'Admin Tasks' },
-        { name: 'hr-feedback', label: 'HR Feedback' },
+        { name: 'slack-ping', label: 'Slack 消息' },
+        { name: 'ticket', label: '工单' },
+        { name: 'gut-check', label: '直觉检查' },
+        { name: 'p2-post', label: 'P2 帖子' },
+        { name: 'p2-discussion', label: 'P2 讨论' },
+        { name: 'slack-discussion', label: 'Slack 讨论' },
+        { name: 'team-call', label: '团队会议' },
+        { name: '1-1', label: '一对一沟通' },
+        { name: 'internal-tools', label: '内部工具' },
+        { name: 'workflow-improvement', label: '流程优化' },
+        { name: 'buddying', label: '伙伴互助' },
+        { name: 'tool-exploration', label: '工具探索' },
+        { name: 'deep-dive', label: '深度研究' },
+        { name: 'shared-insight', label: '分享见解' },
+        { name: 'fraud-pattern', label: '欺诈模式' },
+        { name: 'webinar', label: '网络研讨会' },
+        { name: 'e-learning', label: '在线学习' },
+        { name: 'coaching', label: '辅导培训' },
+        { name: 'reading', label: '阅读' },
+        { name: 'fu-update', label: '欺诈小组大学更新' },
+        { name: 'survey', label: '问卷调查' },
+        { name: 'admin', label: '行政事务' },
+        { name: 'hr-feedback', label: 'HR 反馈' },
         { name: 'ai', label: 'AI' },
-        { name: 'data-analysis', label: 'Data Analysis' },
-        { name: 'meetup', label: 'Meetup' },
-        { name: 'event', label: 'Event' },
-        { name: 'other', label: 'Other' }
+        { name: 'data-analysis', label: '数据分析' },
+        { name: 'meetup', label: '线下聚会' },
+        { name: 'event', label: '活动' },
+        { name: 'other', label: '其他' }
       ]
     });
 

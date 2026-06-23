@@ -13,6 +13,7 @@ model TaskType {
   name            String           @unique // e.g. "MANUAL_REVIEW_WORK"
   label           String // e.g. "Manual Review Work"
   sortOrder       Int              @default(0) // Custom display order, defaults to 0
+  prompt          String?
   tasks           Task[]
   automationRules AutomationRule[]
 }
@@ -27,11 +28,16 @@ model Tag {
 
 model Task {
   id          String    @id @default(cuid())
+  name        String?
   description String?
   type        TaskType? @relation(fields: [typeId], references: [id])
   typeId      String?
+  parentId    String?
+  parent      Task?     @relation("TaskHierarchy", fields: [parentId], references: [id])
+  children    Task[]    @relation("TaskHierarchy")
   date        DateTime  @default(now())
   link        String?
+  report      String?
   createdAt   DateTime  @default(now())
   tags        TaskTag[]
 }

@@ -33,12 +33,14 @@ export async function getAllTags() {
   });
 }
 
-export async function addTask({ description, type, tags, date, link }: {
+export async function addTask({ name, description, type, tags, date, link, parentId }: {
+  name?: string;
   description?: string;
   type?: string;
   tags?: string[];
   date: string;
   link?: string;
+  parentId?: string;
 }) {
   let taskType = null;
   if (type) {
@@ -74,8 +76,10 @@ export async function addTask({ description, type, tags, date, link }: {
 
   return await prisma.task.create({
     data: {
+      name,
       description,
       typeId: taskType?.id,
+      parentId: parentId || null,
       date: new Date(date),
       link,
       tags: allTagIds.length > 0 ? {
@@ -130,6 +134,27 @@ export async function fetchTasks(filters: {
           label: true,
         },
       },
+      parent: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+      children: {
+        include: {
+          type: {
+            select: { name: true, label: true },
+          },
+          tags: {
+            include: {
+              tag: {
+                select: { name: true, label: true },
+              },
+            },
+          },
+        },
+        orderBy: { date: 'asc' },
+      },
       tags: {
         include: {
           tag: {
@@ -147,192 +172,226 @@ export async function fetchTasks(filters: {
   });
 }
 
-export async function updateTask({ 
-  id, 
-  description, 
-  type, 
-  tags, 
-  date, 
-  link 
+export async function updateTask({
+  id,
+  name,
+  description,
+  type,
+  tags,
+  date,
+  link,
+  parentId,
 }: {
   id: string;
-  description: string;
-  type: string;
-  tags: string[];
+  name?: string;
+  description?: string;
+  type?: string;
+  tags?: string[];
   date: string;
   link?: string;
+  parentId?: string;
 }) {
-  const taskType = await prisma.taskType.findUnique({
-    where: { name: type }
-  });
+  let taskType = null;
+  if (type) {
+    taskType = await prisma.taskType.findUnique({
+      where: { name: type }
+    });
+    if (!taskType) throw new Error('Invalid task type');
+  }
 
-  if (!taskType) throw new Error('Invalid task type');
+  // Prevent a task from being its own parent
+  if (parentId && parentId === id) {
+    throw new Error('A task cannot be its own parent');
+  }
 
-  // Get existing tags
-  const existingTags = await prisma.tag.findMany({
-    where: { name: { in: tags } }
-  });
+  // Process tags
+  const tagsList = tags || [];
+  let allTagIds: string[] = [];
+  if (tagsList.length > 0) {
+    const existingTags = await prisma.tag.findMany({
+      where: { name: { in: tagsList } }
+    });
 
-  // Create any new tags that don't exist
-  const newTags = tags.filter(
-    tag => !existingTags.find((et: { name: string }) => et.name === tag)
-  ).map(tag => ({
-    name: tag,
-    label: tag.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
-  }));
+    // Create any new tags that don't exist
+    const newTags = tagsList.filter(
+      tag => !existingTags.find((et: { name: string }) => et.name === tag)
+    ).map(tag => ({
+      name: tag,
+      label: tag.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+    }));
 
-  const createdTags = await prisma.$transaction(
-    newTags.map(tag => prisma.tag.create({ data: tag }))
-  );
+    const createdTags = await prisma.$transaction(
+      newTags.map(tag => prisma.tag.create({ data: tag }))
+    );
 
-  const allTagIds = [
-    ...existingTags.map((t: { id: string }) => t.id),
-    ...createdTags.map((t: { id: string }) => t.id)
-  ];
+    allTagIds = [
+      ...existingTags.map((t: { id: string }) => t.id),
+      ...createdTags.map((t: { id: string }) => t.id)
+    ];
+  }
 
   // Delete existing task-tag relationships
   await prisma.taskTag.deleteMany({
     where: { taskId: id }
   });
 
+  // Build update data
+  const updateData: Record<string, unknown> = {
+    date: new Date(date),
+  };
+  if (name !== undefined) updateData.name = name;
+  if (description !== undefined) updateData.description = description;
+  updateData.typeId = taskType?.id ?? null;
+  if (parentId !== undefined) updateData.parentId = parentId || null;
+  if (link !== undefined) updateData.link = link;
+  if (allTagIds.length > 0) {
+    updateData.tags = {
+      create: allTagIds.map(tagId => ({
+        tag: { connect: { id: tagId } }
+      }))
+    };
+  }
+
   // Update the task
   return await prisma.task.update({
     where: { id },
-    data: {
-      description,
-      typeId: taskType.id,
-      date: new Date(date),
-      link,
-      tags: {
-        create: allTagIds.map(tagId => ({
-          tag: { connect: { id: tagId } }
-        }))
-      }
-    }
+    data: updateData
   });
 }
 
 export async function deleteTask(id: string) {
-  // Delete task-tag relationships first (due to foreign key constraints)
+  // Find all child tasks
+  const children = await prisma.task.findMany({
+    where: { parentId: id },
+    select: { id: true },
+  });
+  const childIds = children.map(c => c.id);
+
+  // Delete TaskTag rows for all children
+  if (childIds.length > 0) {
+    await prisma.taskTag.deleteMany({
+      where: { taskId: { in: childIds } }
+    });
+  }
+
+  // Delete all children
+  await prisma.task.deleteMany({
+    where: { parentId: id }
+  });
+
+  // Delete parent's TaskTag rows
   await prisma.taskTag.deleteMany({
     where: { taskId: id }
   });
 
-  // Then delete the task
+  // Delete the parent task
   return await prisma.task.delete({
     where: { id }
   });
 }
 
 /**
- * Gets the current reporting period from the database
- * This is a server action that can be called from client components
+ * Returns all top-level tasks (parentId IS NULL) for the parent task dropdown
  */
-export async function getLockedReportingPeriodAction(): Promise<{ periodStart: Date; periodEnd: Date }> {
-  'use server';
-  
-  const prisma = await import('../lib/prisma').then(m => m.prisma);
-  
-  // Get the current reporting period settings from the database
-  const startSetting = await prisma.$queryRaw`
-    SELECT value FROM "Setting" WHERE key = 'reportingPeriod_start'
-  ` as { value: string }[];
-  
-  const nextStartSetting = await prisma.$queryRaw`
-    SELECT value FROM "Setting" WHERE key = 'reportingPeriod_nextStartDate'
-  ` as { value: string }[];
-  
-  let periodStart: Date;
-  let nextStartDate: Date;
-  
-  // If no reporting period settings exist, create defaults starting from the most recent Friday
-  if (startSetting.length === 0 || nextStartSetting.length === 0) {
-    const today = new Date();
-    const daysUntilFriday = (5 - today.getDay() + 7) % 7;
-    periodStart = new Date(today);
-    periodStart.setDate(today.getDate() - daysUntilFriday);
-    periodStart.setHours(0, 0, 0, 0);
-    
-    nextStartDate = new Date(periodStart);
-    nextStartDate.setDate(periodStart.getDate() + 14);
-    
-    // Format dates as YYYY-MM-DD for storage
-    const periodStartStr = formatDateOnly(periodStart);
-    const nextStartDateStr = formatDateOnly(nextStartDate);
-    
-    // Insert default settings
-    await prisma.$executeRaw`
-      INSERT OR REPLACE INTO "Setting" (key, value, "updatedAt") 
-      VALUES ('reportingPeriod_start', ${periodStartStr}, CURRENT_TIMESTAMP)
-    `;
-    
-    await prisma.$executeRaw`
-      INSERT OR REPLACE INTO "Setting" (key, value, "updatedAt") 
-      VALUES ('reportingPeriod_nextStartDate', ${nextStartDateStr}, CURRENT_TIMESTAMP)
-    `;
+export async function fetchParentTaskOptions(): Promise<{ id: string; name: string | null }[]> {
+  return await prisma.task.findMany({
+    where: { parentId: null },
+    select: { id: true, name: true },
+    orderBy: { date: 'desc' },
+  });
+}
+
+/**
+ * Save a report for a task
+ */
+export async function saveTaskReport(taskId: string, report: string): Promise<{ success: boolean; message: string }> {
+  try {
+    await prisma.task.update({
+      where: { id: taskId },
+      data: { report },
+    });
+    return { success: true, message: '报告保存成功' };
+  } catch (error) {
+    console.error('Error saving task report:', error);
+    return { success: false, message: '报告保存失败' };
+  }
+}
+
+/**
+ * Get a task by ID with full details including parent, children, and type/tags
+ */
+export async function getTaskById(taskId: string) {
+  return await prisma.task.findUnique({
+    where: { id: taskId },
+    include: {
+      type: { select: { name: true, label: true, prompt: true } },
+      tags: { include: { tag: { select: { name: true, label: true } } } },
+      parent: { select: { id: true, name: true, description: true } },
+      children: {
+        include: {
+          type: { select: { name: true, label: true, prompt: true } },
+          tags: { include: { tag: { select: { name: true, label: true } } } },
+        },
+        orderBy: { date: 'asc' },
+      },
+    },
+  });
+}
+
+/**
+ * Get related tasks for a task:
+ * - If it's a child task: return its siblings (other children of the same parent)
+ * - If it's a parent task: return its children
+ */
+export async function getRelatedTasks(taskId: string) {
+  const task = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: { parentId: true },
+  });
+  if (!task) return [];
+
+  if (task.parentId) {
+    // Child task: return siblings (explicitly select report + description)
+    return await prisma.task.findMany({
+      where: { parentId: task.parentId, id: { not: taskId } },
+      select: {
+        id: true, name: true, description: true, report: true, date: true,
+        link: true, parentId: true, typeId: true, createdAt: true,
+        type: { select: { name: true, label: true, prompt: true } },
+        tags: { include: { tag: { select: { name: true, label: true } } } },
+      },
+      orderBy: { date: 'asc' },
+    });
   } else {
-    // Use existing settings - parse the YYYY-MM-DD format
-    periodStart = parseDateOnly(startSetting[0].value);
-    nextStartDate = parseDateOnly(nextStartSetting[0].value);
+    // Parent task: return children
+    return await prisma.task.findMany({
+      where: { parentId: taskId },
+      select: {
+        id: true, name: true, description: true, report: true, date: true,
+        link: true, parentId: true, typeId: true, createdAt: true,
+        type: { select: { name: true, label: true, prompt: true } },
+        tags: { include: { tag: { select: { name: true, label: true } } } },
+      },
+      orderBy: { date: 'asc' },
+    });
   }
-  
-  // Check if we need to roll over to the next period
-  const today = new Date();
-  today.setHours(0, 0, 0, 0); // Set to beginning of day for proper comparison
-  
-  if (today >= nextStartDate) {
-    // Update the reporting period
-    const newPeriodStart = nextStartDate;
-    const newNextStartDate = new Date(newPeriodStart);
-    newNextStartDate.setDate(newPeriodStart.getDate() + 14);
-    
-    // Format dates as YYYY-MM-DD for storage
-    const newPeriodStartStr = formatDateOnly(newPeriodStart);
-    const newNextStartDateStr = formatDateOnly(newNextStartDate);
-    
-    // Update settings
-    await prisma.$executeRaw`
-      UPDATE "Setting" 
-      SET value = ${newPeriodStartStr}, "updatedAt" = CURRENT_TIMESTAMP 
-      WHERE key = 'reportingPeriod_start'
-    `;
-    
-    await prisma.$executeRaw`
-      UPDATE "Setting" 
-      SET value = ${newNextStartDateStr}, "updatedAt" = CURRENT_TIMESTAMP 
-      WHERE key = 'reportingPeriod_nextStartDate'
-    `;
-    
-    periodStart = newPeriodStart;
-    nextStartDate = newNextStartDate;
-  }
-  
-  // Calculate the period end as 1 day before the next start date
-  const periodEnd = new Date(nextStartDate);
-  periodEnd.setDate(periodEnd.getDate() - 1);
-  // Set time to start of day instead of end of day for proper display in date inputs
-  periodEnd.setHours(0, 0, 0, 0);
-  
-  return { 
-    periodStart, 
-    periodEnd 
-  };
 }
 
 /**
- * Formats a date object to YYYY-MM-DD string format
- * @param date - The date to format
+ * Get all parent tasks for the task picker
  */
-function formatDateOnly(date: Date): string {
-  return date.toISOString().split('T')[0];
+export async function getAllParentTasksWithChildren() {
+  return await prisma.task.findMany({
+    where: { parentId: null },
+    select: {
+      id: true,
+      name: true,
+      children: {
+        select: { id: true, name: true, date: true },
+        orderBy: { date: 'asc' },
+      },
+    },
+    orderBy: { date: 'desc' },
+  });
 }
 
-/**
- * Parses a YYYY-MM-DD string to a Date object
- * @param dateStr - The date string to parse
- */
-function parseDateOnly(dateStr: string): Date {
-  const date = new Date(dateStr);
-  date.setHours(0, 0, 0, 0);
-  return date;
-}

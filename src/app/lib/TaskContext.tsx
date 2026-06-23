@@ -16,6 +16,8 @@ interface TaskContextType {
   notification: Notification | null;
   showNotification: (type: NotificationType, message: string) => void;
   clearNotification: () => void;
+  prefillParentId: string | null;
+  setPrefillParentId: (id: string | null) => void;
 }
 
 const TaskContext = createContext<TaskContextType | undefined>(undefined);
@@ -23,6 +25,7 @@ const TaskContext = createContext<TaskContextType | undefined>(undefined);
 export function TaskProvider({ children }: { children: ReactNode }) {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [notification, setNotification] = useState<Notification | null>(null);
+  const [prefillParentId, setPrefillParentId] = useState<string | null>(null);
 
   const triggerRefresh = () => {
     setRefreshTrigger(prev => prev + 1);
@@ -30,7 +33,7 @@ export function TaskProvider({ children }: { children: ReactNode }) {
 
   const showNotification = (type: NotificationType, message: string) => {
     setNotification({ type, message });
-    
+
     // Auto-clear notifications after 5 seconds
     setTimeout(() => {
       setNotification(null);
@@ -42,12 +45,14 @@ export function TaskProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <TaskContext.Provider value={{ 
-      refreshTrigger, 
-      triggerRefresh, 
-      notification, 
-      showNotification, 
-      clearNotification 
+    <TaskContext.Provider value={{
+      refreshTrigger,
+      triggerRefresh,
+      notification,
+      showNotification,
+      clearNotification,
+      prefillParentId,
+      setPrefillParentId,
     }}>
       {children}
     </TaskContext.Provider>
@@ -60,4 +65,4 @@ export function useTaskContext() {
     throw new Error('useTaskContext must be used within a TaskProvider');
   }
   return context;
-} 
+}

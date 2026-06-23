@@ -1,28 +1,37 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getOpenAIApiKey } from '@/app/settings/actions';
+import { getOpenAIApiKey, getDeepSeekApiKey } from '@/app/settings/actions';
 
 export default function ApiKeyCheck() {
   const [apiKeyStatus, setApiKeyStatus] = useState<'checking' | 'available' | 'missing'>('checking');
-  
+  const [availableProvider, setAvailableProvider] = useState<string | null>(null);
+
   useEffect(() => {
-    // Check if API key is available from Settings table
+    // Check if any API key is available from Settings table
     const checkApiKey = async () => {
       try {
-        const { value } = await getOpenAIApiKey();
-        
-        if (value && value.trim() !== '') {
+        const { value: openAIKey } = await getOpenAIApiKey();
+        if (openAIKey && openAIKey.trim() !== '') {
           setApiKeyStatus('available');
-        } else {
-          setApiKeyStatus('missing');
+          setAvailableProvider('OpenAI');
+          return;
         }
+
+        const { value: deepSeekKey } = await getDeepSeekApiKey();
+        if (deepSeekKey && deepSeekKey.trim() !== '') {
+          setApiKeyStatus('available');
+          setAvailableProvider('DeepSeek');
+          return;
+        }
+
+        setApiKeyStatus('missing');
       } catch (error) {
         console.error('Error checking API key:', error);
         setApiKeyStatus('missing');
       }
     };
-    
+
     checkApiKey();
   }, []);
 
@@ -31,7 +40,24 @@ export default function ApiKeyCheck() {
   }
 
   if (apiKeyStatus === 'available') {
-    return null;
+    return (
+      <div className="bg-green-50 border-l-4 border-green-400 p-4 mb-4">
+        <div className="flex">
+          <div className="flex-shrink-0">
+            <svg className="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+            </svg>
+          </div>
+          <div className="ml-3">
+            <p className="text-sm text-green-700">
+              <strong className="font-medium">{availableProvider} API Key Found</strong>
+              <br />
+              AI features are ready to use with {availableProvider}.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -44,14 +70,14 @@ export default function ApiKeyCheck() {
         </div>
         <div className="ml-3">
           <p className="text-sm text-yellow-700">
-            <strong className="font-medium">OpenAI API Key Not Found</strong>
+            <strong className="font-medium">No AI API Key Found</strong>
             <br />
-            No OpenAI API key was found in the system settings.
+            No OpenAI or DeepSeek API key was found in the system settings.
             <br />
-            Go to Settings → AI Config to add your OpenAI API key.
+            Go to Settings → AI Config to add an API key (OpenAI or DeepSeek).
           </p>
         </div>
       </div>
     </div>
   );
-} 
+}

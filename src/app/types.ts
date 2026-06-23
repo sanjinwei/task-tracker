@@ -3,7 +3,10 @@
  */
 export interface Task {
   id: string;
-  description: string;
+  name: string | null;
+  description: string | null;
+  parentId: string | null;
+  children?: Task[];
   date: Date;
   link: string | null;
   type: {

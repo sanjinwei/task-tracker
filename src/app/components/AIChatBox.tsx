@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getOpenAIApiKey, getLMStudioEndpoint, getOpenAIEndpoint } from '@/app/settings/actions';
+import { getOpenAIApiKey, getLMStudioEndpoint, getOpenAIEndpoint, getDeepSeekApiKey, getDeepSeekEndpoint } from '@/app/settings/actions';
 
 // Default fallback endpoint for OpenAI (used only if not found in settings)
 const DEFAULT_OPENAI_ENDPOINT = 'https://api.openai.com/v1/chat/completions';
@@ -10,20 +10,24 @@ interface AIChatBoxProps {
   prompt: string;
   content: string;
   previousFeedback?: string | null;
+  relatedTasks?: string;
+  relatedFiles?: string;
   onEdit?: (newContent: string) => void;
   onPromptEdit?: (newPrompt: string) => void;
   onSendToAI?: (response: string) => void;
   onLoadingStateChange?: (loading: boolean) => void;
-  selectedModel?: 'lm-studio' | 'openai-gpt4o';
+  selectedModel?: 'lm-studio' | 'openai-gpt4o' | 'deepseek';
 }
 
-export default function AIChatBox({ 
-  prompt, 
-  content, 
+export default function AIChatBox({
+  prompt,
+  content,
   previousFeedback = null,
-  onEdit, 
-  onPromptEdit, 
-  onSendToAI, 
+  relatedTasks,
+  relatedFiles,
+  onEdit,
+  onPromptEdit,
+  onSendToAI,
   onLoadingStateChange,
   selectedModel = 'openai-gpt4o'
 }: AIChatBoxProps) {
@@ -31,9 +35,19 @@ export default function AIChatBox({
   const [editedPrompt, setEditedPrompt] = useState(prompt);
   const [editedContent, setEditedContent] = useState(content);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Sync props to state when not editing (handles async data loading)
+  useEffect(() => {
+    if (!isEditing) {
+      setEditedPrompt(prompt);
+      setEditedContent(content);
+    }
+  }, [prompt, content, isEditing]);
   const [openAIApiKey, setOpenAIApiKey] = useState<string>('');
   const [lmStudioEndpoint, setLMStudioEndpoint] = useState<string>('http://localhost:1234/v1/chat/completions');
   const [openAIEndpoint, setOpenAIEndpoint] = useState<string>(DEFAULT_OPENAI_ENDPOINT);
+  const [deepSeekApiKey, setDeepSeekApiKey] = useState<string>('');
+  const [deepSeekEndpoint, setDeepSeekEndpoint] = useState<string>('https://api.deepseek.com/v1/chat/completions');
   
   // Fetch API settings from the Settings table
   useEffect(() => {
@@ -54,6 +68,15 @@ export default function AIChatBox({
         if (selectedModel === 'openai-gpt4o') {
           const { value } = await getOpenAIApiKey();
           setOpenAIApiKey(value || '');
+        }
+
+        // Fetch DeepSeek settings
+        if (selectedModel === 'deepseek') {
+          const { value: dsKey } = await getDeepSeekApiKey();
+          if (dsKey) setDeepSeekApiKey(dsKey);
+
+          const { value: dsEndpoint } = await getDeepSeekEndpoint();
+          if (dsEndpoint) setDeepSeekEndpoint(dsEndpoint);
         }
       } catch (error) {
         console.error('Error fetching API settings:', error);
@@ -110,98 +133,72 @@ export default function AIChatBox({
     setIsLoading(true);
     
     try {
-      // Replace the placeholders with the actual content
-      let finalPrompt = editedPrompt.replace('%TASK_SUMMARY%', editedContent);
-      
-      // Replace the previous feedback placeholder if available
+      // Use props directly (not state) to always get latest data
+      let finalPrompt = prompt.replace('%TASK_SUMMARY%', content);
+
+      // Replace optional placeholders if they exist in prompt
       if (previousFeedback) {
         finalPrompt = finalPrompt.replace('%SUMMARIZED_PREVIOUS_FEEDBACK%', previousFeedback);
-      } else {
-        // If no previous feedback, remove the section
-        finalPrompt = finalPrompt.replace(/Here is a brief summary of my previous HR feedback, to use as context:\n%SUMMARIZED_PREVIOUS_FEEDBACK%\n\n/g, '');
       }
-      
-      // Determine which API endpoint to use based on selected model
-      const endpoint = selectedModel === 'lm-studio' ? lmStudioEndpoint : openAIEndpoint;
-      const headers: HeadersInit = {
-        'Content-Type': 'application/json',
-      };
-      
-      // Add authentication for OpenAI
-      if (selectedModel === 'openai-gpt4o') {
-        if (!openAIApiKey) {
-          throw new Error('OpenAI API key is missing');
-        }
-        headers['Authorization'] = `Bearer ${openAIApiKey}`;
+      if (relatedTasks) {
+        finalPrompt = finalPrompt.replace('%RELATED_TASKS%', relatedTasks);
       }
+      if (relatedFiles) {
+        finalPrompt = finalPrompt.replace('%RELATED_FILES%', relatedFiles);
+      }
+
+      // Remove any remaining placeholder sections
+      finalPrompt = finalPrompt
+        .replace(/## Previous Feedback Context\n%SUMMARIZED_PREVIOUS_FEEDBACK%\n\n/g, '')
+        .replace(/## 相关任务\n%RELATED_TASKS%\n\n/g, '')
+        .replace(/## 相关文件\n%RELATED_FILES%\n\n/g, '');
       
-      // Prepare the body based on the selected model
-      let body;
+      // Determine AI provider settings
+      let apiEndpoint: string;
+      let apiKey = '';
+      let modelName: string;
       if (selectedModel === 'lm-studio') {
-        body = JSON.stringify({
-          model: 'meta-llama-3.1-8b-instruct',
-          messages: [
-            {
-              role: 'user',
-              content: finalPrompt
-            }
-          ],
-          temperature: 0.7,
-        });
+        apiEndpoint = lmStudioEndpoint;
+        modelName = 'meta-llama-3.1-8b-instruct';
+      } else if (selectedModel === 'deepseek') {
+        apiEndpoint = deepSeekEndpoint;
+        modelName = 'deepseek-chat';
+        if (!deepSeekApiKey) throw new Error('缺少 DeepSeek API 密钥');
+        apiKey = deepSeekApiKey;
       } else {
-        body = JSON.stringify({
-          model: 'gpt-4o',
-          messages: [
-            {
-              role: 'user',
-              content: finalPrompt
-            }
-          ],
-          temperature: 0.7,
-        });
+        apiEndpoint = openAIEndpoint;
+        modelName = 'gpt-4o';
+        if (!openAIApiKey) throw new Error('缺少 OpenAI API 密钥');
+        apiKey = openAIApiKey;
       }
-      
-      // Call the API
-      const response = await fetch(endpoint, {
+
+      // Call AI through server-side proxy to avoid CORS
+      const response = await fetch('/api/ai/chat', {
         method: 'POST',
-        headers,
-        body,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          endpoint: apiEndpoint,
+          apiKey,
+          model: modelName,
+          messages: [{ role: 'user', content: finalPrompt }],
+        }),
       });
-      
+
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        console.error('API Error Details:', {
-          status: response.status,
-          statusText: response.statusText,
-          errorData,
-          endpoint,
-          hasApiKey: selectedModel === 'openai-gpt4o' ? !!openAIApiKey : 'N/A',
-        });
-        throw new Error(`API request failed with status ${response.status}: ${response.statusText}`);
+        const err = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+        throw new Error((err as { error?: string }).error || `请求失败 (${response.status})`);
       }
-      
+
       const data = await response.json();
-      const aiResponse = data.choices[0]?.message?.content || 'No response from AI';
-      
+      const aiResponse = data.choices?.[0]?.message?.content || 'AI 未返回响应';
+
       // Pass the AI response back to the parent
       onSendToAI(aiResponse);
     } catch (error: unknown) {
       console.error(`Error calling ${selectedModel} API:`, error);
-      
+
       const errorMessage = error instanceof Error ? error.message : String(error);
-      
-      // Provide more specific error messages based on error type
-      if (selectedModel === 'openai-gpt4o') {
-        if (!openAIApiKey) {
-          alert('OpenAI API key is missing. Please go to Settings → AI Config to add your API key.');
-        } else if (errorMessage.includes('401')) {
-          alert('OpenAI API authentication failed. Please check that your API key is valid and properly formatted.');
-        } else {
-          alert(`Failed to get AI summary from OpenAI: ${errorMessage}`);
-        }
-      } else {
-        alert(`Failed to get AI summary from LM Studio. Make sure LM Studio is running and the API endpoint is accessible at ${lmStudioEndpoint}`);
-      }
+      alert(`从 ${selectedModel === 'openai-gpt4o' ? 'OpenAI' : selectedModel === 'deepseek' ? 'DeepSeek' : 'LM Studio'} 获取 AI 摘要失败：${errorMessage}`);
     } finally {
       setIsLoading(false);
     }
@@ -219,21 +216,21 @@ export default function AIChatBox({
           </div>
         </div>
         <div className="flex-1">
-          <div className="text-sm text-gray-500 mb-1">AI Assistant</div>
+          <div className="text-sm text-gray-500 mb-1">AI 助手</div>
           {isEditing ? (
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Prompt</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">提示词</label>
                 <textarea
                   value={editedPrompt}
                   onChange={(e) => setEditedPrompt(e.target.value)}
                   className="w-full p-2 border border-gray-300 rounded-md focus:ring-purple-500 focus:border-purple-500 text-gray-900"
                   rows={3}
-                  placeholder="Enter your prompt with placeholders like %TASK_SUMMARY% and %SUMMARIZED_PREVIOUS_FEEDBACK%"
+                  placeholder="输入提示词，可使用 %TASK_SUMMARY% 和 %SUMMARIZED_PREVIOUS_FEEDBACK% 占位符"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Task Summary</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">任务内容</label>
                 <textarea
                   value={editedContent}
                   onChange={(e) => setEditedContent(e.target.value)}
@@ -246,13 +243,13 @@ export default function AIChatBox({
                   onClick={handleSave}
                   className="px-3 py-1 text-sm text-white bg-purple-600 rounded-md hover:bg-purple-700"
                 >
-                  Save
+                  保存
                 </button>
                 <button
                   onClick={handleCancel}
                   className="px-3 py-1 text-sm text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
                 >
-                  Cancel
+                  取消
                 </button>
               </div>
             </div>
@@ -264,7 +261,7 @@ export default function AIChatBox({
                   onClick={handleSendToAI}
                   disabled={isLoading}
                   className="p-1 text-gray-400 hover:text-gray-600"
-                  title="Send to AI for summarization"
+                  title="发送给 AI 生成摘要"
                 >
                   {isLoading ? (
                     <svg className="animate-spin h-5 w-5 text-purple-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -280,7 +277,7 @@ export default function AIChatBox({
                 <button
                   onClick={handleEdit}
                   className="p-1 text-gray-400 hover:text-gray-600"
-                  title="Edit prompt and content"
+                  title="编辑提示词和内容"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                     <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />

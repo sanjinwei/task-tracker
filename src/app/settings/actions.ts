@@ -3,97 +3,18 @@
 import { prisma } from '@/app/lib/prisma';
 
 /**
- * Updates the reporting period start date in the Settings table
- * @param startDate - The new reporting period start date
- */
-export async function updateReportingPeriod(startDate: Date): Promise<{ success: boolean; message: string }> {
-  try {
-    // Calculate the next start date (14 days after the periodStart)
-    const nextStartDate = new Date(startDate);
-    nextStartDate.setDate(startDate.getDate() + 14);
-    
-    // Format dates as YYYY-MM-DD for storage
-    const startDateStr = formatDateOnly(startDate);
-    const nextStartDateStr = formatDateOnly(nextStartDate);
-    
-    // Update the Settings records
-    const updateStart = await updateSetting('reportingPeriod_start', startDateStr);
-    const updateNextStart = await updateSetting('reportingPeriod_nextStartDate', nextStartDateStr);
-    
-    if (!updateStart.success || !updateNextStart.success) {
-      return { 
-        success: false, 
-        message: 'Failed to update one or more reporting period settings' 
-      };
-    }
-    
-    return { 
-      success: true, 
-      message: 'Reporting period updated successfully' 
-    };
-  } catch (error) {
-    console.error('Error updating reporting period:', error);
-    return { 
-      success: false, 
-      message: 'Failed to update reporting period' 
-    };
-  }
-}
-
-/**
- * Gets the current reporting period settings from the Settings table
- */
-export async function getReportingPeriodSettings(): Promise<{ periodStart: Date; nextStartDate: Date }> {
-  try {
-    // Get the current reporting period settings from the database
-    const startResult = await getSetting('reportingPeriod_start');
-    const nextStartResult = await getSetting('reportingPeriod_nextStartDate');
-    
-    // If settings don't exist, return current date and calculated next date
-    if (!startResult.value || !nextStartResult.value) {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const nextDate = new Date(today);
-      nextDate.setDate(today.getDate() + 14);
-      
-      return { 
-        periodStart: today,
-        nextStartDate: nextDate
-      };
-    }
-    
-    return { 
-      periodStart: parseDateOnly(startResult.value),
-      nextStartDate: parseDateOnly(nextStartResult.value)
-    };
-  } catch (error) {
-    console.error('Error fetching reporting period settings:', error);
-    // Return current date and calculated next date as fallback
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const nextDate = new Date(today);
-    nextDate.setDate(today.getDate() + 14);
-    
-    return { 
-      periodStart: today,
-      nextStartDate: nextDate
-    };
-  }
-}
-
-/**
  * Gets all task types (categories) from the database
  */
 export async function getTaskTypes(): Promise<{ id: string; name: string; label: string; sortOrder?: number }[]> {
   try {
     // Use $queryRaw to get task types ordered by sortOrder field
     const taskTypes = await prisma.$queryRaw`
-      SELECT id, name, label, "sortOrder" 
-      FROM "TaskType" 
+      SELECT id, name, label, prompt, "sortOrder"
+      FROM "TaskType"
       ORDER BY "sortOrder" ASC, label ASC
     `;
-    
-    return taskTypes as { id: string; name: string; label: string; sortOrder: number }[];
+
+    return taskTypes as { id: string; name: string; label: string; prompt: string | null; sortOrder: number }[];
   } catch (error) {
     console.error('Error fetching task types:', error);
     return [];
@@ -104,69 +25,37 @@ export async function getTaskTypes(): Promise<{ id: string; name: string; label:
  * Creates a new task type (category)
  * @param label - The display name for the category
  */
-export async function createTaskType(label: string): Promise<{ 
-  success: boolean; 
-  message: string; 
-  taskType?: { id: string; name: string; label: string; } 
+export async function createTaskType(label: string, name?: string, prompt?: string): Promise<{
+  success: boolean;
+  message: string;
+  taskType?: { id: string; name: string; label: string; }
 }> {
   try {
-    // Convert label to a system name (uppercase with underscores)
-    const name = label.trim().toUpperCase().replace(/\s+/g, '_');
-    
-    // Check if a task type with this name already exists
-    const existingTaskType = await prisma.taskType.findFirst({
-      where: {
-        OR: [
-          { name },
-          { label }
-        ]
-      }
-    });
-    
-    if (existingTaskType) {
-      return {
-        success: false,
-        message: 'A category with this name already exists'
-      };
+    const systemName = name?.trim() || label.trim().toUpperCase().replace(/\s+/g, '_');
+
+    const existing = await prisma.taskType.findFirst({ where: { name: systemName } });
+    if (existing) {
+      return { success: false, message: '此系统名称已被占用' };
     }
-    
-    // Find the highest current sortOrder value
-    const result = await prisma.$queryRaw`
-      SELECT MAX("sortOrder") as max_order FROM "TaskType"
-    ` as { max_order: number | null }[];
-    
-    // Get the max order value (or default to -1 if no task types exist)
-    const maxOrder = result[0]?.max_order ?? -1;
-    const newOrder = maxOrder + 1;
-    
-    // Create the task type using the ORM but include the sortOrder field
-    // Using $executeRaw to set the sortOrder since the schema might not have
-    // the sortOrder field in the TypeScript types yet
+
+    const maxOrderResult = await prisma.taskType.aggregate({
+      _max: { sortOrder: true },
+    });
+    const newOrder = (maxOrderResult._max.sortOrder ?? -1) + 1;
+
     const taskType = await prisma.taskType.create({
       data: {
-        name,
-        label: label.trim()
-      }
+        name: systemName,
+        label: label.trim(),
+        sortOrder: newOrder,
+        prompt: prompt || null,
+      },
     });
-    
-    // Update the sortOrder separately
-    await prisma.$executeRaw`
-      UPDATE "TaskType" 
-      SET "sortOrder" = ${newOrder} 
-      WHERE id = ${taskType.id}
-    `;
-    
-    return {
-      success: true,
-      message: 'Category added successfully',
-      taskType
-    };
+
+    return { success: true, message: '分类添加成功', taskType };
   } catch (error) {
     console.error('Error creating task type:', error);
-    return {
-      success: false,
-      message: 'Failed to create category'
-    };
+    return { success: false, message: '创建分类失败：' + (error instanceof Error ? error.message : String(error)) };
   }
 }
 
@@ -175,41 +64,25 @@ export async function createTaskType(label: string): Promise<{
  * @param id - The ID of the task type to update
  * @param label - The new display name for the category
  */
-export async function updateTaskType(id: string, label: string): Promise<{ 
-  success: boolean; 
-  message: string; 
-  taskType?: { id: string; name: string; label: string; } 
+export async function updateTaskType(id: string, label: string, name: string, prompt?: string): Promise<{
+  success: boolean;
+  message: string;
+  taskType?: { id: string; name: string; label: string; }
 }> {
   try {
-    // Convert label to a system name (uppercase with underscores)
-    const name = label.trim().toUpperCase().replace(/\s+/g, '_');
-    
-    // Check if another task type with this name already exists (excluding the current one)
     const existingTaskType = await prisma.taskType.findFirst({
-      where: {
-        OR: [
-          { name },
-          { label: label.trim() }
-        ],
-        NOT: {
-          id
-        }
-      }
+      where: { name, NOT: { id } }
     });
-    
     if (existingTaskType) {
-      return {
-        success: false,
-        message: 'Another category with this name already exists'
-      };
+      return { success: false, message: '此系统名称已被其他分类占用' };
     }
-    
-    // Update the task type
+
     const taskType = await prisma.taskType.update({
       where: { id },
       data: {
         name,
-        label: label.trim()
+        label: label.trim(),
+        prompt: prompt !== undefined ? prompt || null : undefined,
       }
     });
     
@@ -291,51 +164,27 @@ export async function getTags(): Promise<{ id: string; name: string; label: stri
  * Creates a new tag
  * @param label - The display name for the tag
  */
-export async function createTag(label: string): Promise<{ 
-  success: boolean; 
-  message: string; 
-  tag?: { id: string; name: string; label: string; } 
+export async function createTag(label: string, name?: string): Promise<{
+  success: boolean;
+  message: string;
+  tag?: { id: string; name: string; label: string; }
 }> {
   try {
-    // Convert label to a system name (lowercase with hyphens)
-    const name = label.trim().toLowerCase().replace(/\s+/g, '-');
-    
-    // Check if a tag with this name already exists
-    const existingTag = await prisma.tag.findFirst({
-      where: {
-        OR: [
-          { name },
-          { label }
-        ]
-      }
-    });
-    
-    if (existingTag) {
-      return {
-        success: false,
-        message: 'A tag with this name already exists'
-      };
+    const systemName = name?.trim() || label.trim().toLowerCase().replace(/\s+/g, '-');
+
+    const existing = await prisma.tag.findFirst({ where: { name: systemName } });
+    if (existing) {
+      return { success: false, message: '此系统名称已被占用' };
     }
-    
-    // Create the new tag
+
     const tag = await prisma.tag.create({
-      data: {
-        name,
-        label: label.trim()
-      }
+      data: { name: systemName, label: label.trim() }
     });
-    
-    return {
-      success: true,
-      message: 'Tag added successfully',
-      tag
-    };
+
+    return { success: true, message: '标签添加成功', tag };
   } catch (error) {
     console.error('Error creating tag:', error);
-    return {
-      success: false,
-      message: 'Failed to create tag'
-    };
+    return { success: false, message: '创建标签失败' };
   }
 }
 
@@ -344,42 +193,22 @@ export async function createTag(label: string): Promise<{
  * @param id - The ID of the tag to update
  * @param label - The new display name for the tag
  */
-export async function updateTag(id: string, label: string): Promise<{ 
-  success: boolean; 
-  message: string; 
-  tag?: { id: string; name: string; label: string; } 
+export async function updateTag(id: string, label: string, name: string): Promise<{
+  success: boolean;
+  message: string;
+  tag?: { id: string; name: string; label: string; }
 }> {
   try {
-    // Convert label to a system name (lowercase with hyphens)
-    const name = label.trim().toLowerCase().replace(/\s+/g, '-');
-    
-    // Check if another tag with this name already exists (excluding the current one)
-    const existingTag = await prisma.tag.findFirst({
-      where: {
-        OR: [
-          { name },
-          { label: label.trim() }
-        ],
-        NOT: {
-          id
-        }
-      }
+    const existing = await prisma.tag.findFirst({
+      where: { name, NOT: { id } }
     });
-    
-    if (existingTag) {
-      return {
-        success: false,
-        message: 'Another tag with this name already exists'
-      };
+    if (existing) {
+      return { success: false, message: '此系统名称已被其他标签占用' };
     }
-    
-    // Update the tag
+
     const tag = await prisma.tag.update({
       where: { id },
-      data: {
-        name,
-        label: label.trim()
-      }
+      data: { name, label: label.trim() }
     });
     
     return {
@@ -445,16 +274,14 @@ export async function updateTaskTypeOrder(id: string, newOrder: number): Promise
   message: string; 
 }> {
   try {
-    // Update the task type's order using a raw query
-    await prisma.$executeRaw`
-      UPDATE "TaskType" 
-      SET "sortOrder" = ${newOrder} 
-      WHERE id = ${id}
-    `;
-    
+    await prisma.taskType.update({
+      where: { id },
+      data: { sortOrder: newOrder },
+    });
+
     return {
       success: true,
-      message: 'Category order updated successfully'
+      message: '分类排序更新成功'
     };
   } catch (error) {
     console.error('Error updating category order:', error);
@@ -598,19 +425,51 @@ export async function updateOpenAIEndpoint(endpoint: string): Promise<{ success:
 }
 
 /**
- * Formats a date object to YYYY-MM-DD string format
- * @param date - The date to format
+ * Gets the DeepSeek API key from the Settings table
  */
-function formatDateOnly(date: Date): string {
-  return date.toISOString().split('T')[0];
+export async function getDeepSeekApiKey(): Promise<{ value: string | null }> {
+  try {
+    return await getSetting('deepseekapikey');
+  } catch (error) {
+    console.error('Error fetching DeepSeek API key:', error);
+    return { value: null };
+  }
 }
 
 /**
- * Parses a YYYY-MM-DD string to a Date object
- * @param dateStr - The date string to parse
+ * Updates the DeepSeek API key in the Settings table
+ * @param apiKey - The DeepSeek API key
  */
-function parseDateOnly(dateStr: string): Date {
-  const date = new Date(dateStr);
-  date.setHours(0, 0, 0, 0);
-  return date;
+export async function updateDeepSeekApiKey(apiKey: string): Promise<{ success: boolean; message: string }> {
+  try {
+    return await updateSetting('deepseekapikey', apiKey);
+  } catch (error) {
+    console.error('Error updating DeepSeek API key:', error);
+    return { success: false, message: 'Failed to update DeepSeek API key' };
+  }
+}
+
+/**
+ * Gets the DeepSeek API endpoint from the Settings table
+ */
+export async function getDeepSeekEndpoint(): Promise<{ value: string | null }> {
+  try {
+    return await getSetting('deepseekendpoint');
+  } catch (error) {
+    console.error('Error fetching DeepSeek API endpoint:', error);
+    return { value: null };
+  }
+}
+
+/**
+ * Updates the DeepSeek API endpoint in the Settings table
+ * @param endpoint - The DeepSeek API endpoint URL
+ */
+export async function updateDeepSeekEndpoint(endpoint: string): Promise<{ success: boolean; message: string }> {
+  try {
+    return await updateSetting('deepseekendpoint', endpoint);
+  } catch (error) {
+    console.error('Error updating DeepSeek endpoint:', error);
+    return { success: false, message: 'Failed to update DeepSeek API endpoint' };
+  }
 }

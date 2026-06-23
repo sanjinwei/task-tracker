@@ -18,16 +18,14 @@ interface TaskFiltersProps {
     endDate: string;
   };
   onClearFilters?: () => void;
-  onApplyCustomFilter?: () => void;
 }
 
-export default function TaskFilters({ 
-  taskTypes, 
-  tags, 
+export default function TaskFilters({
+  taskTypes,
+  tags,
   onFilterChange,
   initialFilters = { type: '', tag: '', startDate: '', endDate: '' },
   onClearFilters,
-  onApplyCustomFilter
 }: TaskFiltersProps) {
   const [type, setType] = useState(initialFilters.type);
   const [tag, setTag] = useState(initialFilters.tag);
@@ -99,29 +97,18 @@ export default function TaskFilters({
     }, 0);
   };
 
-  // Apply custom date filter
-  const handleApplyCustomFilter = () => {
-    // Notify the parent of filter changes
-    notifyFilterChange();
-    
-    // Call the onApplyCustomFilter callback if provided
-    if (onApplyCustomFilter) {
-      onApplyCustomFilter();
-    }
-  };
-
   return (
     <div className="mb-6 p-4 bg-white rounded-lg shadow">
-      <h2 className="text-lg font-semibold mb-4 text-gray-900">Filter Tasks</h2>
+      <h2 className="text-lg font-semibold mb-4 text-gray-900">筛选任务</h2>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <div>
-          <label className="block text-sm font-medium text-gray-900 mb-1">Category</label>
+          <label className="block text-sm font-medium text-gray-900 mb-1">分类</label>
           <select
             value={type}
             onChange={handleTypeChange}
             className="w-full p-2 border border-gray-300 rounded-md text-gray-900"
           >
-            <option value="">All Categories</option>
+            <option value="">全部分类</option>
             {taskTypes.map((t) => (
               <option key={t.name} value={t.name}>
                 {t.label}
@@ -129,15 +116,15 @@ export default function TaskFilters({
             ))}
           </select>
         </div>
-        
+
         <div>
-          <label className="block text-sm font-medium text-gray-900 mb-1">Tag</label>
+          <label className="block text-sm font-medium text-gray-900 mb-1">标签</label>
           <select
             value={tag}
             onChange={handleTagChange}
             className="w-full p-2 border border-gray-300 rounded-md text-gray-900"
           >
-            <option value="">All Tags</option>
+            <option value="">全部标签</option>
             {tags.map((t) => (
               <option key={t.name} value={t.name}>
                 {t.label}
@@ -145,9 +132,9 @@ export default function TaskFilters({
             ))}
           </select>
         </div>
-        
+
         <div>
-          <label className="block text-sm font-medium text-gray-900 mb-1">Start Date</label>
+          <label className="block text-sm font-medium text-gray-900 mb-1">开始日期</label>
           <input
             type="date"
             value={startDate}
@@ -155,9 +142,9 @@ export default function TaskFilters({
             className="w-full p-2 border border-gray-300 rounded-md text-gray-900"
           />
         </div>
-        
+
         <div>
-          <label className="block text-sm font-medium text-gray-900 mb-1">End Date</label>
+          <label className="block text-sm font-medium text-gray-900 mb-1">结束日期</label>
           <input
             type="date"
             value={endDate}
@@ -166,19 +153,19 @@ export default function TaskFilters({
           />
         </div>
       </div>
-      
+
       <div className="mt-4 flex justify-end space-x-2">
         <button
-          onClick={handleApplyCustomFilter}
+          onClick={notifyFilterChange}
           className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600"
         >
-          Filter
+          筛选
         </button>
         <button
           onClick={handleClearFilters}
           className="px-4 py-2 bg-gray-200 text-gray-900 rounded-md hover:bg-gray-300"
         >
-          Clear Filters
+          清除筛选
         </button>
       </div>
     </div>
