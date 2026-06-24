@@ -55,7 +55,10 @@ export async function createTaskType(label: string, name?: string, prompt?: stri
     return { success: true, message: '分类添加成功', taskType };
   } catch (error) {
     console.error('Error creating task type:', error);
-    return { success: false, message: '创建分类失败：' + (error instanceof Error ? error.message : String(error)) };
+    const errorMsg = process.env.NODE_ENV === 'development'
+      ? (error instanceof Error ? error.message : String(error))
+      : '创建分类失败，请重试';
+    return { success: false, message: '创建分类失败：' + errorMsg };
   }
 }
 

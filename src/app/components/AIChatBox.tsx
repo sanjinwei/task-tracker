@@ -1,10 +1,6 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getOpenAIApiKey, getLMStudioEndpoint, getOpenAIEndpoint, getDeepSeekApiKey, getDeepSeekEndpoint } from '@/app/settings/actions';
-
-// Default fallback endpoint for OpenAI (used only if not found in settings)
-const DEFAULT_OPENAI_ENDPOINT = 'https://api.openai.com/v1/chat/completions';
 
 interface AIChatBoxProps {
   prompt: string;
@@ -43,48 +39,6 @@ export default function AIChatBox({
       setEditedContent(content);
     }
   }, [prompt, content, isEditing]);
-  const [openAIApiKey, setOpenAIApiKey] = useState<string>('');
-  const [lmStudioEndpoint, setLMStudioEndpoint] = useState<string>('http://localhost:1234/v1/chat/completions');
-  const [openAIEndpoint, setOpenAIEndpoint] = useState<string>(DEFAULT_OPENAI_ENDPOINT);
-  const [deepSeekApiKey, setDeepSeekApiKey] = useState<string>('');
-  const [deepSeekEndpoint, setDeepSeekEndpoint] = useState<string>('https://api.deepseek.com/v1/chat/completions');
-  
-  // Fetch API settings from the Settings table
-  useEffect(() => {
-    const fetchAPISettings = async () => {
-      try {
-        // Always fetch both endpoints regardless of selected model
-        const { value: lmEndpoint } = await getLMStudioEndpoint();
-        if (lmEndpoint) {
-          setLMStudioEndpoint(lmEndpoint);
-        }
-        
-        const { value: oaiEndpoint } = await getOpenAIEndpoint();
-        if (oaiEndpoint) {
-          setOpenAIEndpoint(oaiEndpoint);
-        }
-        
-        // Fetch OpenAI API key if that model is selected
-        if (selectedModel === 'openai-gpt4o') {
-          const { value } = await getOpenAIApiKey();
-          setOpenAIApiKey(value || '');
-        }
-
-        // Fetch DeepSeek settings
-        if (selectedModel === 'deepseek') {
-          const { value: dsKey } = await getDeepSeekApiKey();
-          if (dsKey) setDeepSeekApiKey(dsKey);
-
-          const { value: dsEndpoint } = await getDeepSeekEndpoint();
-          if (dsEndpoint) setDeepSeekEndpoint(dsEndpoint);
-        }
-      } catch (error) {
-        console.error('Error fetching API settings:', error);
-      }
-    };
-    
-    fetchAPISettings();
-  }, [selectedModel]);
 
   // Update edited content when content prop changes
   useEffect(() => {
@@ -109,15 +63,11 @@ export default function AIChatBox({
 
   const handleSave = () => {
     if (onEdit) {
-      // Pass the edited content back to the parent
       onEdit(editedContent);
     }
-    
     if (onPromptEdit) {
-      // Pass the edited prompt back to the parent
       onPromptEdit(editedPrompt);
     }
-    
     setIsEditing(false);
   };
 
@@ -129,14 +79,12 @@ export default function AIChatBox({
 
   const handleSendToAI = async () => {
     if (!onSendToAI) return;
-    
+
     setIsLoading(true);
-    
+
     try {
-      // Use props directly (not state) to always get latest data
       let finalPrompt = prompt.replace('%TASK_SUMMARY%', content);
 
-      // Replace optional placeholders if they exist in prompt
       if (previousFeedback) {
         finalPrompt = finalPrompt.replace('%SUMMARIZED_PREVIOUS_FEEDBACK%', previousFeedback);
       }
@@ -147,38 +95,24 @@ export default function AIChatBox({
         finalPrompt = finalPrompt.replace('%RELATED_FILES%', relatedFiles);
       }
 
-      // Remove any remaining placeholder sections
       finalPrompt = finalPrompt
         .replace(/## Previous Feedback Context\n%SUMMARIZED_PREVIOUS_FEEDBACK%\n\n/g, '')
         .replace(/## 相关任务\n%RELATED_TASKS%\n\n/g, '')
         .replace(/## 相关文件\n%RELATED_FILES%\n\n/g, '');
-      
-      // Determine AI provider settings
-      let apiEndpoint: string;
-      let apiKey = '';
-      let modelName: string;
-      if (selectedModel === 'lm-studio') {
-        apiEndpoint = lmStudioEndpoint;
-        modelName = 'meta-llama-3.1-8b-instruct';
-      } else if (selectedModel === 'deepseek') {
-        apiEndpoint = deepSeekEndpoint;
-        modelName = 'deepseek-chat';
-        if (!deepSeekApiKey) throw new Error('缺少 DeepSeek API 密钥');
-        apiKey = deepSeekApiKey;
-      } else {
-        apiEndpoint = openAIEndpoint;
-        modelName = 'gpt-4o';
-        if (!openAIApiKey) throw new Error('缺少 OpenAI API 密钥');
-        apiKey = openAIApiKey;
-      }
 
-      // Call AI through server-side proxy to avoid CORS
+      // Map UI model id to the actual model name sent to AI
+      const modelNameMap: Record<string, string> = {
+        'openai-gpt4o': 'gpt-4o',
+        'deepseek': 'deepseek-chat',
+        'lm-studio': 'meta-llama-3.1-8b-instruct',
+      };
+      const modelName = modelNameMap[selectedModel] || selectedModel;
+
+      // Call AI through server-side proxy — no API keys in the client!
       const response = await fetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          endpoint: apiEndpoint,
-          apiKey,
           model: modelName,
           messages: [{ role: 'user', content: finalPrompt }],
         }),
@@ -192,13 +126,11 @@ export default function AIChatBox({
       const data = await response.json();
       const aiResponse = data.choices?.[0]?.message?.content || 'AI 未返回响应';
 
-      // Pass the AI response back to the parent
       onSendToAI(aiResponse);
     } catch (error: unknown) {
-      console.error(`Error calling ${selectedModel} API:`, error);
-
+      console.error(`Error calling AI API`);
       const errorMessage = error instanceof Error ? error.message : String(error);
-      alert(`从 ${selectedModel === 'openai-gpt4o' ? 'OpenAI' : selectedModel === 'deepseek' ? 'DeepSeek' : 'LM Studio'} 获取 AI 摘要失败：${errorMessage}`);
+      alert(`AI 请求失败：${errorMessage}`);
     } finally {
       setIsLoading(false);
     }

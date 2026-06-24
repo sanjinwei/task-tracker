@@ -26,6 +26,9 @@ const DEFAULT_PROMPT = `你是一个专业的工作报告撰写助手。请基�
 const PARENT_HINT = '\n\n注意：此任务是一个父任务（项目），请重点关注此项目的主要内容概述以及各个子任务的完成情况汇总。';
 const CHILD_HINT = '\n\n注意：此任务是一个子任务（进度条目），请主要聚焦于此任务本身的具体内容和工作产出。';
 
+// File upload size limit: 5 MB
+const MAX_FILE_SIZE = 5 * 1024 * 1024;
+
 // --- Types for related tasks ---
 interface RelatedTask {
   id: string;
@@ -220,6 +223,10 @@ export default function SummaryPageClient({ taskId, from }: { taskId?: string; f
     if (!files) return;
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
+      if (file.size > MAX_FILE_SIZE) {
+        alert(`文件 ${file.name} 超过 5MB 限制，已跳过`);
+        continue;
+      }
       try {
         const content = await readFileContent(file);
         setRelatedFiles(prev => [...prev, { name: file.name, content }]);
@@ -247,42 +254,17 @@ export default function SummaryPageClient({ taskId, from }: { taskId?: string; f
   };
 
   // Summarize a child's report into one sentence
-  const summarizeChildReport = async (report: string, model: AIModel): Promise<string> => {
+  const summarizeChildReport = async (report: string, _model: AIModel): Promise<string> => {
     try {
-      // Read API config from settings
-      let endpoint = '';
-      let apiKey = '';
-      let modelName = 'gpt-4o';
-
-      if (model === 'lm-studio') {
-        const { value } = await import('@/app/settings/actions').then(m => m.getLMStudioEndpoint());
-        endpoint = value || 'http://localhost:1234/v1/chat/completions';
-        modelName = 'meta-llama-3.1-8b-instruct';
-      } else if (model === 'deepseek') {
-        const [epRes, keyRes] = await Promise.all([
-          import('@/app/settings/actions').then(m => m.getDeepSeekEndpoint()),
-          import('@/app/settings/actions').then(m => m.getDeepSeekApiKey()),
-        ]);
-        endpoint = epRes.value || 'https://api.deepseek.com/v1/chat/completions';
-        apiKey = keyRes.value || '';
-        modelName = 'deepseek-chat';
-      } else {
-        const [epRes, keyRes] = await Promise.all([
-          import('@/app/settings/actions').then(m => m.getOpenAIEndpoint()),
-          import('@/app/settings/actions').then(m => m.getOpenAIApiKey()),
-        ]);
-        endpoint = epRes.value || 'https://api.openai.com/v1/chat/completions';
-        apiKey = keyRes.value || '';
-        modelName = 'gpt-4o';
-      }
-
-      if (!apiKey && model !== 'lm-studio') throw new Error('No API key');
+      const modelName = _model === 'deepseek' ? 'deepseek-chat'
+        : _model === 'lm-studio' ? 'meta-llama-3.1-8b-instruct'
+        : 'gpt-4o';
 
       const resp = await fetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          endpoint, apiKey, model: modelName,
+          model: modelName,
           messages: [{ role: 'user', content: `请用3-5句话总结以下报告的核心内容。要求：保留所有重要细节、关键数据、特殊要求和未完成事项，不要省略任何明确写出的要求。\n\n${report.substring(0, 2500)}` }],
         }),
       });

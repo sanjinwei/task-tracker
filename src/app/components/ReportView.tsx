@@ -1,6 +1,6 @@
 'use client';
 
-import './report-styles.css'; // We'll create this CSS file next
+import DOMPurify from 'dompurify';
 
 interface ReportViewProps {
   reportHTML: string;
@@ -18,9 +18,9 @@ export default function ReportView({ reportHTML, onDownload }: ReportViewProps) 
           下载报告
         </button>
       </div>
-      <div 
+      <div
         className="p-6 bg-white rounded-lg shadow text-gray-900 report-content"
-        dangerouslySetInnerHTML={{ __html: reportHTML }}
+        dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(reportHTML) }}
       />
     </div>
   );
