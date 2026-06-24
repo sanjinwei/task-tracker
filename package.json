@@ -10,11 +10,12 @@
     "postinstall": "prisma generate"
   },
   "dependencies": {
-    "@prisma/client": "^6.6.0",
+    "@prisma/client": "^6.19.3",
     "@types/dompurify": "^3.0.5",
     "date-fns": "^4.1.0",
     "dayjs": "^1.11.13",
     "dompurify": "^3.4.11",
+    "jose": "^6.2.3",
     "jszip": "^3.10.1",
     "next": "^16.2.9",
     "react": "^19.0.0",

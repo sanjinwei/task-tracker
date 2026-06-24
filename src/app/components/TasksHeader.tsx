@@ -2,12 +2,17 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { CiSettings } from 'react-icons/ci';
+import { CiSettings, CiLogout } from 'react-icons/ci';
 import { useTaskContext } from '@/app/lib/TaskContext';
 
 export default function TasksHeader() {
   const router = useRouter();
   const { setShowAddTaskForm } = useTaskContext();
+
+  const handleLogout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    router.push('/login');
+  };
 
   return (
     <div className="flex justify-between items-center">
@@ -41,12 +46,16 @@ export default function TasksHeader() {
         <div className="relative group">
           <Link href="/settings" className="text-gray-500 hover:text-gray-900 p-2 rounded-full hover:bg-gray-100 transition-colors">
             <CiSettings className="w-6 h-6" />
-            <span className="sr-only">设置</span>
           </Link>
-          <div className="absolute right-0 top-0 -translate-y-full hidden group-hover:block bg-gray-800 text-white text-xs rounded py-1 px-2 whitespace-nowrap mb-1">
-            设置
-          </div>
         </div>
+
+        <button
+          onClick={handleLogout}
+          className="text-gray-400 hover:text-red-500 p-2 rounded-full hover:bg-red-50 transition-colors"
+          title="登出"
+        >
+          <CiLogout className="w-6 h-6" />
+        </button>
       </div>
     </div>
   );

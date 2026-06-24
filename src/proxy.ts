@@ -1,33 +1,61 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { verifyToken, TOKEN_COOKIE } from '@/lib/auth';
 
-// Simple Basic Auth guard. Set APP_PASSWORD in Vercel environment variables.
-// If APP_PASSWORD is not set, all requests pass through (opt-in security).
-export default function proxy(req: NextRequest) {
-  const appPassword = process.env.APP_PASSWORD;
+// Routes that don't require authentication
+const PUBLIC_PATHS = [
+  '/login',
+  '/api/auth/login',
+  '/api/auth/logout',
+];
 
-  // No password configured → allow all (for local dev or opt-in)
-  if (!appPassword) {
+function isPublicPath(pathname: string): boolean {
+  return PUBLIC_PATHS.some(p => pathname.startsWith(p));
+}
+
+function isStaticAsset(pathname: string): boolean {
+  return (
+    pathname.startsWith('/_next/') ||
+    pathname.startsWith('/static/') ||
+    pathname.startsWith('/favicon.ico') ||
+    !!pathname.match(/\.(svg|png|jpg|jpeg|gif|ico|css|js|woff2?)$/)
+  );
+}
+
+export default async function proxy(req: NextRequest) {
+  const { pathname } = req.nextUrl;
+
+  // Allow public paths and static assets
+  if (isPublicPath(pathname) || isStaticAsset(pathname)) {
+    // If already logged in and visiting /login, redirect to /tasks
+    if (pathname === '/login') {
+      const token = req.cookies.get(TOKEN_COOKIE)?.value;
+      if (token) {
+        const payload = await verifyToken(token);
+        if (payload) {
+          return NextResponse.redirect(new URL('/tasks', req.url));
+        }
+      }
+    }
     return NextResponse.next();
   }
 
-  const auth = req.headers.get('authorization');
-  // Use Web API btoa() instead of Node Buffer for Edge runtime compatibility
-  const expected = 'Basic ' + btoa('admin:' + appPassword);
+  // Check JWT cookie
+  const token = req.cookies.get(TOKEN_COOKIE)?.value;
+  if (!token) {
+    return NextResponse.redirect(new URL('/login', req.url));
+  }
 
-  if (auth !== expected) {
-    return new NextResponse('Unauthorized', {
-      status: 401,
-      headers: {
-        'WWW-Authenticate': 'Basic realm="Task Tracker", charset="UTF-8"',
-      },
-    });
+  const payload = await verifyToken(token);
+  if (!payload) {
+    const response = NextResponse.redirect(new URL('/login', req.url));
+    // Clear expired/invalid cookie
+    response.cookies.delete(TOKEN_COOKIE);
+    return response;
   }
 
   return NextResponse.next();
 }
 
 export const config = {
-  // Apply to all routes except API (AI chat proxy needs to be usable without browser auth)
-  // and static assets.
-  matcher: '/((?!api/ai/chat|_next/static|_next/image|favicon.ico).*)',
+  matcher: '/((?!_next/static|_next/image).*)',
 };
