@@ -3,13 +3,14 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { format } from 'date-fns';
 import TaskFilters from './TaskFilters';
-import { fetchTasks, getAllTaskTypes, getAllTags, updateTask, deleteTask, fetchParentTaskOptions } from '@/app/tasks/actions';
+import { fetchTasks, getAllTaskTypes, getAllTags, updateTask, deleteTask, fetchParentTaskOptions, saveTaskReport } from '@/app/tasks/actions';
 import { useTaskContext } from '@/app/lib/TaskContext';
 
 interface Task {
   id: string;
   name: string | null;
   description: string | null;
+  report: string | null;
   parentId: string | null;
   children?: Task[];
   date: Date;
@@ -227,12 +228,14 @@ function TaskCard({
   onEdit,
   onDelete,
   onAddSubtask,
+  onReport,
 }: {
   task: Task;
   isChild?: boolean;
   onEdit: (task: Task) => void;
   onDelete: (taskId: string) => void;
   onAddSubtask?: (parentId: string) => void;
+  onReport?: (task: Task) => void;
 }) {
   return (
     <div className={`${isChild ? 'bg-gray-50 border-gray-100' : 'bg-white border-gray-200'} p-3 rounded-lg shadow-sm border hover:shadow-md transition-shadow`}>
@@ -257,6 +260,12 @@ function TaskCard({
                 {tag.label}
               </span>
             ))}
+            {task.report && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                已有报告
+              </span>
+            )}
           </div>
         </div>
         <div className="ml-4 flex-shrink-0 flex items-center space-x-1">
@@ -286,6 +295,17 @@ function TaskCard({
               </svg>
             </button>
           )}
+          {onReport && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onReport(task); }}
+              className="p-1 text-gray-400 hover:text-purple-600"
+              title="撰写报告"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
+              </svg>
+            </button>
+          )}
           <button onClick={() => onEdit(task)} className="p-1 text-gray-500 hover:text-blue-600" title="编辑任务">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
               <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
@@ -302,6 +322,89 @@ function TaskCard({
   );
 }
 
+function ReportEditor({
+  task,
+  onClose,
+  onSave,
+}: {
+  task: Task;
+  onClose: () => void;
+  onSave: (taskId: string, report: string) => Promise<void>;
+}) {
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [onClose]);
+
+  const [report, setReport] = useState(task.report || '');
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await onSave(task.id, report);
+      onClose();
+    } catch (error) {
+      console.error('Error saving report:', error);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+      onDoubleClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="bg-white rounded-lg p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between items-center mb-4">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900">撰写报告</h2>
+            <p className="text-sm text-gray-500 mt-0.5">{task.name || '未命名任务'}</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-900 mb-1">报告内容</label>
+            <textarea
+              value={report}
+              onChange={(e) => setReport(e.target.value)}
+              rows={16}
+              className="block w-full rounded-md border border-gray-300 bg-white shadow-sm focus:border-purple-500 focus:ring-purple-500 text-gray-900 text-sm leading-relaxed"
+              placeholder="在此撰写任务报告..."
+              autoFocus
+            />
+            <p className="mt-1 text-xs text-gray-400">{report.length} 字</p>
+          </div>
+
+          <div className="flex justify-end space-x-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-sm font-medium text-gray-900 bg-gray-100 hover:bg-gray-200 rounded-md"
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="px-4 py-2 text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 rounded-md disabled:opacity-50"
+            >
+              {saving ? '保存中...' : '保存报告'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export default function TaskList() {
   const { refreshTrigger, showNotification, setPrefillParentId } = useTaskContext();
 
@@ -311,6 +414,7 @@ export default function TaskList() {
       if (e.key === 'Escape') {
         setEditingTask(null);
         setDeletingTaskId(null);
+        setReportingTask(null);
       }
     };
     window.addEventListener('keydown', handleEsc);
@@ -331,6 +435,7 @@ export default function TaskList() {
   });
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
+  const [reportingTask, setReportingTask] = useState<Task | null>(null);
   const [expandedParentIds, setExpandedParentIds] = useState<Set<string>>(new Set());
   const [isSlackPingGroupExpanded, setIsSlackPingGroupExpanded] = useState(false);
 
@@ -486,6 +591,19 @@ export default function TaskList() {
     }
   };
 
+  const handleReportSave = async (taskId: string, report: string) => {
+    try {
+      await saveTaskReport(taskId, report);
+      const filteredTasks = await fetchTasksWithCurrentFilter();
+      setAllTasks(filteredTasks);
+      setReportingTask(null);
+      showNotification('success', '报告保存成功');
+    } catch (err) {
+      console.error('Error saving report:', err);
+      showNotification('error', '报告保存失败');
+    }
+  };
+
   const toggleExpand = (parentId: string) => {
     setExpandedParentIds(prev => {
       const next = new Set(prev);
@@ -602,7 +720,8 @@ export default function TaskList() {
                       .map(task => (
                         <TaskCard key={task.id} task={task} isChild={!!task.parentId}
                           onEdit={setEditingTask} onDelete={(id) => setDeletingTaskId(id)}
-                          onAddSubtask={!task.parentId ? handleAddSubtask : undefined} />
+                          onAddSubtask={!task.parentId ? handleAddSubtask : undefined}
+                          onReport={setReportingTask} />
                       ))}
                   </div>
                 </div>
@@ -642,7 +761,8 @@ export default function TaskList() {
                     <TaskCard task={parent}
                       onEdit={setEditingTask}
                       onDelete={(id) => setDeletingTaskId(id)}
-                      onAddSubtask={handleAddSubtask} />
+                      onAddSubtask={handleAddSubtask}
+                      onReport={setReportingTask} />
                   </div>
 
                   {/* Children section */}
@@ -656,7 +776,8 @@ export default function TaskList() {
                           .map(child => (
                             <TaskCard key={child.id} task={child} isChild
                               onEdit={setEditingTask}
-                              onDelete={(id) => setDeletingTaskId(id)} />
+                              onDelete={(id) => setDeletingTaskId(id)}
+                              onReport={setReportingTask} />
                           ))
                       )}
                     </div>
@@ -706,6 +827,15 @@ export default function TaskList() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Report Editor Modal */}
+      {reportingTask && (
+        <ReportEditor
+          task={reportingTask}
+          onClose={() => setReportingTask(null)}
+          onSave={handleReportSave}
+        />
       )}
     </div>
   );
