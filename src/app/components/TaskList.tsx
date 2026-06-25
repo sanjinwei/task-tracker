@@ -406,7 +406,7 @@ function ReportEditor({
 }
 
 export default function TaskList() {
-  const { refreshTrigger, showNotification, setPrefillParentId } = useTaskContext();
+  const { refreshTrigger, showNotification, setPrefillParentId, setShowAddTaskForm } = useTaskContext();
 
   // Global ESC handler to close modals
   useEffect(() => {
@@ -618,6 +618,7 @@ export default function TaskList() {
 
   const handleAddSubtask = (parentId: string) => {
     setPrefillParentId(parentId);
+    setShowAddTaskForm(true);
   };
 
   const formatDateForInput = (date: Date | null): string => {
