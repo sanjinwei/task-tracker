@@ -55,7 +55,8 @@ export async function POST(request: NextRequest) {
     let endpoint: string;
     let apiKey = '';
 
-    if (model === 'lm-studio') {
+    // Match by model name prefix (clients may send 'deepseek-chat', 'gpt-4o', etc.)
+    if (model.startsWith('lm-studio') || model.startsWith('meta-llama')) {
       // LM Studio runs locally — only allow localhost endpoints
       const saved = await getSetting('lmstudioendpoint');
       endpoint = saved || 'http://localhost:1234/v1/chat/completions';
@@ -66,7 +67,7 @@ export async function POST(request: NextRequest) {
           { status: 403 }
         );
       }
-    } else if (model === 'deepseek') {
+    } else if (model.startsWith('deepseek')) {
       endpoint = ALLOWED_AI_ENDPOINTS.deepseek;
       apiKey = (await getSetting('deepseekapikey')) || '';
       if (!apiKey) {
@@ -76,7 +77,7 @@ export async function POST(request: NextRequest) {
         );
       }
     } else {
-      // Default: OpenAI GPT-4o
+      // Default: OpenAI (gpt-4o, gpt-4, etc.)
       endpoint = ALLOWED_AI_ENDPOINTS.openai;
       apiKey = (await getSetting('openaikey')) || '';
       if (!apiKey) {
