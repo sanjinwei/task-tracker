@@ -8,7 +8,7 @@ import {
   getOpenAIApiKey, getDeepSeekApiKey,
 } from '@/app/settings/actions';
 import {
-  getTaskById, getRelatedTasks, getAllParentTasksWithChildren, saveTaskReport,
+  getTaskById, getRelatedTasks, getAllParentTasksWithChildren, createReport,
 } from '@/app/tasks/actions';
 
 type AIModel = 'lm-studio' | 'openai-gpt4o' | 'deepseek';
@@ -366,14 +366,14 @@ export default function SummaryPageClient({ taskId, from }: { taskId?: string; f
     contextRef.current = fullContext;
   }, [fullContext, aiResponse]);
 
-  // Save report to current task
+  // Save report to current task (creates new report, doesn't overwrite)
   const handleSaveReport = async () => {
     if (!taskId || !editableResponse) return;
     setSaving(true);
     setSaveMessage(null);
     try {
-      const result = await saveTaskReport(taskId, editableResponse);
-      setSaveMessage(result.message);
+      await createReport(taskId, editableResponse);
+      setSaveMessage('报告保存成功（新建为独立报告）');
     } catch {
       setSaveMessage('保存失败');
     } finally {

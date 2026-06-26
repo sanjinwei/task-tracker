@@ -36,9 +36,19 @@ model Task {
   children    Task[]    @relation("TaskHierarchy")
   date        DateTime  @default(now())
   link        String?
-  report      String?
+  report      String?   // @deprecated — replaced by Report model
+  reports     Report[]
   createdAt   DateTime  @default(now())
   tags        TaskTag[]
+}
+
+model Report {
+  id        String   @id @default(cuid())
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model TaskTag {

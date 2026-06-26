@@ -154,6 +154,10 @@ export async function fetchTasks(filters: {
               },
             },
           },
+          reports: {
+            select: { id: true, content: true, createdAt: true, updatedAt: true },
+            orderBy: { createdAt: 'desc' },
+          },
         },
         orderBy: { date: 'asc' },
       },
@@ -166,6 +170,10 @@ export async function fetchTasks(filters: {
             },
           },
         },
+      },
+      reports: {
+        select: { id: true, content: true, createdAt: true, updatedAt: true },
+        orderBy: { createdAt: 'desc' },
       },
     },
     orderBy: {
@@ -303,14 +311,41 @@ export async function fetchParentTaskOptions(): Promise<{ id: string; name: stri
   });
 }
 
+// ---- Report CRUD ----
+
+export async function getReports(taskId: string) {
+  return await prisma.report.findMany({
+    where: { taskId },
+    orderBy: { createdAt: 'desc' },
+  });
+}
+
+export async function createReport(taskId: string, content: string) {
+  return await prisma.report.create({
+    data: { taskId, content },
+  });
+}
+
+export async function updateReport(reportId: string, content: string) {
+  return await prisma.report.update({
+    where: { id: reportId },
+    data: { content },
+  });
+}
+
+export async function deleteReport(reportId: string) {
+  await prisma.report.delete({
+    where: { id: reportId },
+  });
+}
+
 /**
- * Save a report for a task
+ * @deprecated — use createReport instead. Kept for backward compat.
  */
 export async function saveTaskReport(taskId: string, report: string): Promise<{ success: boolean; message: string }> {
   try {
-    await prisma.task.update({
-      where: { id: taskId },
-      data: { report },
+    await prisma.report.create({
+      data: { taskId, content: report },
     });
     return { success: true, message: '报告保存成功' };
   } catch (error) {
@@ -333,8 +368,16 @@ export async function getTaskById(taskId: string) {
         include: {
           type: { select: { name: true, label: true, prompt: true } },
           tags: { include: { tag: { select: { name: true, label: true } } } },
+          reports: {
+            select: { id: true, content: true, createdAt: true, updatedAt: true },
+            orderBy: { createdAt: 'desc' },
+          },
         },
         orderBy: { date: 'asc' },
+      },
+      reports: {
+        select: { id: true, content: true, createdAt: true, updatedAt: true },
+        orderBy: { createdAt: 'desc' },
       },
     },
   });
@@ -353,7 +396,7 @@ export async function getRelatedTasks(taskId: string) {
   if (!task) return [];
 
   if (task.parentId) {
-    // Child task: return siblings (explicitly select report + description)
+    // Child task: return siblings
     return await prisma.task.findMany({
       where: { parentId: task.parentId, id: { not: taskId } },
       select: {
@@ -361,6 +404,10 @@ export async function getRelatedTasks(taskId: string) {
         link: true, parentId: true, typeId: true, createdAt: true,
         type: { select: { name: true, label: true, prompt: true } },
         tags: { include: { tag: { select: { name: true, label: true } } } },
+        reports: {
+          select: { id: true, content: true, createdAt: true, updatedAt: true },
+          orderBy: { createdAt: 'desc' },
+        },
       },
       orderBy: { date: 'asc' },
     });
@@ -373,6 +420,10 @@ export async function getRelatedTasks(taskId: string) {
         link: true, parentId: true, typeId: true, createdAt: true,
         type: { select: { name: true, label: true, prompt: true } },
         tags: { include: { tag: { select: { name: true, label: true } } } },
+        reports: {
+          select: { id: true, content: true, createdAt: true, updatedAt: true },
+          orderBy: { createdAt: 'desc' },
+        },
       },
       orderBy: { date: 'asc' },
     });

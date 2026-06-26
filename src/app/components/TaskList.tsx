@@ -3,14 +3,22 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { format } from 'date-fns';
 import TaskFilters from './TaskFilters';
-import { fetchTasks, getAllTaskTypes, getAllTags, updateTask, deleteTask, fetchParentTaskOptions, saveTaskReport } from '@/app/tasks/actions';
+import { fetchTasks, getAllTaskTypes, getAllTags, updateTask, deleteTask, fetchParentTaskOptions, getReports, createReport, updateReport, deleteReport } from '@/app/tasks/actions';
 import { useTaskContext } from '@/app/lib/TaskContext';
+
+interface TaskReport {
+  id: string;
+  content: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
 
 interface Task {
   id: string;
   name: string | null;
   description: string | null;
   report: string | null;
+  reports?: TaskReport[];
   parentId: string | null;
   children?: Task[];
   date: Date;
@@ -260,10 +268,10 @@ function TaskCard({
                 {tag.label}
               </span>
             ))}
-            {task.report && (
+            {(task.reports && task.reports.length > 0) && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
-                已有报告
+                {task.reports.length} 份报告
               </span>
             )}
           </div>
@@ -325,11 +333,11 @@ function TaskCard({
 function ReportEditor({
   task,
   onClose,
-  onSave,
+  onRefresh,
 }: {
   task: Task;
   onClose: () => void;
-  onSave: (taskId: string, report: string) => Promise<void>;
+  onRefresh: () => void;
 }) {
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -337,69 +345,157 @@ function ReportEditor({
     return () => window.removeEventListener('keydown', handleEsc);
   }, [onClose]);
 
-  const [report, setReport] = useState(task.report || '');
+  const [reports, setReports] = useState<TaskReport[]>(task.reports || []);
+  const [selectedId, setSelectedId] = useState<string | null>(reports[0]?.id || null);
+  const [content, setContent] = useState('');
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Load reports from server
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true);
+      try {
+        const data = await getReports(task.id);
+        setReports(data);
+        if (data.length > 0 && !selectedId) setSelectedId(data[0].id);
+      } catch { /* ignore */ }
+      setLoading(false);
+    };
+    load();
+  }, [task.id]);
+
+  // Sync content when selected report changes
+  useEffect(() => {
+    const r = reports.find(r => r.id === selectedId);
+    setContent(r?.content || '');
+  }, [selectedId, reports]);
+
+  const selectedReport = reports.find(r => r.id === selectedId);
+
+  const handleSave = async () => {
+    if (!content.trim()) return;
     setSaving(true);
     try {
-      await onSave(task.id, report);
-      onClose();
-    } catch (error) {
-      console.error('Error saving report:', error);
-    } finally {
-      setSaving(false);
-    }
+      if (selectedId) {
+        await updateReport(selectedId, content);
+        setReports(prev => prev.map(r => r.id === selectedId ? { ...r, content } : r));
+      } else {
+        const created = await createReport(task.id, content);
+        setReports(prev => [created, ...prev]);
+        setSelectedId(created.id);
+      }
+      onRefresh();
+    } catch { /* ignore */ }
+    setSaving(false);
+  };
+
+  const handleNew = () => {
+    setSelectedId(null);
+    setContent('');
+  };
+
+  const handleDelete = async (reportId: string) => {
+    if (!confirm('确定要删除这份报告吗？此操作不可撤销。')) return;
+    try {
+      await deleteReport(reportId);
+      setReports(prev => prev.filter(r => r.id !== reportId));
+      if (selectedId === reportId) {
+        const remaining = reports.filter(r => r.id !== reportId);
+        setSelectedId(remaining[0]?.id || null);
+      }
+      onRefresh();
+    } catch { /* ignore */ }
+  };
+
+  const formatDate = (d: Date) => {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   };
 
   return (
     <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center p-4 z-50"
       onDoubleClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="bg-white rounded-lg p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex justify-between items-center mb-4">
-          <div>
-            <h2 className="text-xl font-semibold text-gray-900">撰写报告</h2>
-            <p className="text-sm text-gray-500 mt-0.5">{task.name || '未命名任务'}</p>
+      <div className="bg-white rounded-lg shadow-xl flex flex-col md:flex-row max-w-5xl w-full max-h-[90vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        {/* Left sidebar: report list */}
+        <div className="w-full md:w-56 bg-gray-50 border-b md:border-b-0 md:border-r border-gray-200 flex flex-col flex-shrink-0">
+          <div className="p-3 border-b border-gray-200">
+            <h2 className="font-semibold text-gray-900 text-sm truncate">{task.name || '未命名任务'}</h2>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          <div className="flex-1 overflow-y-auto">
+            {loading ? (
+              <p className="text-gray-400 text-xs p-3">加载中...</p>
+            ) : reports.length === 0 ? (
+              <p className="text-gray-400 text-xs p-3">暂无报告</p>
+            ) : (
+              reports.map(r => (
+                <button
+                  key={r.id}
+                  onClick={() => setSelectedId(r.id)}
+                  className={`w-full text-left px-3 py-2 text-xs border-b border-gray-100 hover:bg-gray-100 transition-colors ${
+                    selectedId === r.id ? 'bg-purple-50 border-l-2 border-l-purple-500 font-medium text-purple-900' : 'text-gray-700'
+                  }`}
+                >
+                  <div className="truncate">{r.content.substring(0, 40) || '(空报告)'}</div>
+                  <div className="text-gray-400 mt-0.5">{formatDate(r.createdAt)}</div>
+                </button>
+              ))
+            )}
+          </div>
+          <div className="p-2 border-t border-gray-200">
+            <button
+              onClick={handleNew}
+              className="w-full py-1.5 text-xs font-medium text-purple-600 hover:bg-purple-50 rounded-md transition-colors flex items-center justify-center gap-1"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
+              </svg>
+              新建报告
+            </button>
+          </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-900 mb-1">报告内容</label>
-            <textarea
-              value={report}
-              onChange={(e) => setReport(e.target.value)}
-              rows={16}
-              className="block w-full rounded-md border border-gray-300 bg-white shadow-sm focus:border-purple-500 focus:ring-purple-500 text-gray-900 text-sm leading-relaxed"
-              placeholder="在此撰写任务报告..."
-              autoFocus
-            />
-            <p className="mt-1 text-xs text-gray-400">{report.length} 字</p>
+        {/* Right: editor */}
+        <div className="flex-1 flex flex-col min-h-0">
+          <div className="flex justify-between items-center p-4 border-b border-gray-200">
+            <div className="text-sm text-gray-500">
+              {selectedId ? (selectedReport ? `编辑报告 · ${formatDate(selectedReport.createdAt)}` : '编辑报告') : '新建报告'}
+            </div>
+            <div className="flex items-center gap-2">
+              {selectedId && (
+                <button onClick={() => handleDelete(selectedId)}
+                  className="px-2 py-1 text-xs text-red-500 hover:bg-red-50 rounded">
+                  删除
+                </button>
+              )}
+              <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
           </div>
-
-          <div className="flex justify-end space-x-3">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-sm font-medium text-gray-900 bg-gray-100 hover:bg-gray-200 rounded-md"
-            >
-              取消
-            </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="px-4 py-2 text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 rounded-md disabled:opacity-50"
-            >
-              {saving ? '保存中...' : '保存报告'}
-            </button>
+          <textarea
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            rows={16}
+            className="flex-1 block w-full border-0 resize-none focus:ring-0 text-gray-900 text-sm leading-relaxed p-4"
+            placeholder="在此撰写任务报告..."
+            autoFocus
+          />
+          <div className="flex justify-between items-center p-3 border-t border-gray-200 bg-gray-50">
+            <span className="text-xs text-gray-400">{content.length} 字</span>
+            <div className="flex gap-2">
+              <button onClick={onClose}
+                className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 hover:bg-gray-100 rounded-md">
+                取消
+              </button>
+              <button onClick={handleSave} disabled={saving}
+                className="px-3 py-1.5 text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 rounded-md disabled:opacity-50">
+                {saving ? '保存中...' : '保存'}
+              </button>
+            </div>
           </div>
-        </form>
+        </div>
       </div>
     </div>
   );
@@ -591,17 +687,9 @@ export default function TaskList() {
     }
   };
 
-  const handleReportSave = async (taskId: string, report: string) => {
-    try {
-      await saveTaskReport(taskId, report);
-      const filteredTasks = await fetchTasksWithCurrentFilter();
-      setAllTasks(filteredTasks);
-      setReportingTask(null);
-      showNotification('success', '报告保存成功');
-    } catch (err) {
-      console.error('Error saving report:', err);
-      showNotification('error', '报告保存失败');
-    }
+  const refreshTasks = async () => {
+    const filteredTasks = await fetchTasksWithCurrentFilter();
+    setAllTasks(filteredTasks);
   };
 
   const toggleExpand = (parentId: string) => {
@@ -835,7 +923,7 @@ export default function TaskList() {
         <ReportEditor
           task={reportingTask}
           onClose={() => setReportingTask(null)}
-          onSave={handleReportSave}
+          onRefresh={refreshTasks}
         />
       )}
     </div>

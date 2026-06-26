@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { format } from 'date-fns';
-import { fetchTasks, saveTaskReport } from '@/app/tasks/actions';
+import { fetchTasks, getReports, createReport, updateReport, deleteReport } from '@/app/tasks/actions';
 import { TaskWithType } from '@/app/tasks/report';
 import JSZip from 'jszip';
 
@@ -74,93 +74,135 @@ function buildReportStructure(tasks: TaskWithType[]): CategoryGroup[] {
   return result;
 }
 
-// Inline editable report section
+// Inline editable report section — supports multiple reports per task
+interface ReportItem { id: string; content: string; createdAt: Date | string; updatedAt: Date | string; }
+
 function ReportSection({
-  label,
-  report,
-  placeholder,
-  taskId,
-  colorClass,
-  onReportChanged,
+  label, taskId, colorClass, onReportChanged,
 }: {
   label: string;
-  report: string | null;
-  placeholder: string;
   taskId: string;
   colorClass: string;
   onReportChanged: () => void;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [editText, setEditText] = useState(report || '');
+  const [reports, setReports] = useState<ReportItem[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState('');
   const [saving, setSaving] = useState(false);
-  const [deleting, setDeleting] = useState(false);
+  const [showNew, setShowNew] = useState(false);
+  const [newText, setNewText] = useState('');
   const router = useRouter();
 
-  const handleSave = async () => {
+  useEffect(() => {
+    getReports(taskId).then(data => { setReports(data); setLoaded(true); });
+  }, [taskId]);
+
+  const handleEdit = (r: ReportItem) => {
+    setEditingId(r.id);
+    setEditText(r.content);
+    setShowNew(false);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingId) return;
     setSaving(true);
-    await saveTaskReport(taskId, editText);
+    await updateReport(editingId, editText);
+    setReports(prev => prev.map(r => r.id === editingId ? { ...r, content: editText } : r));
     setSaving(false);
-    setEditing(false);
+    setEditingId(null);
     onReportChanged();
   };
 
-  const handleDelete = async () => {
-    setDeleting(true);
-    await saveTaskReport(taskId, '');
-    setDeleting(false);
-    setEditText('');
+  const handleDelete = async (reportId: string) => {
+    if (!confirm('确定删除此报告？')) return;
+    await deleteReport(reportId);
+    setReports(prev => prev.filter(r => r.id !== reportId));
     onReportChanged();
   };
+
+  const handleCreate = async () => {
+    if (!newText.trim()) return;
+    setSaving(true);
+    const created = await createReport(taskId, newText);
+    setReports(prev => [created, ...prev]);
+    setNewText('');
+    setShowNew(false);
+    setSaving(false);
+    onReportChanged();
+  };
+
+  const formatDate = (d: Date | string) => {
+    const date = typeof d === 'string' ? new Date(d) : d;
+    return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+  };
+
+  if (!loaded) return <div className="text-gray-400 text-xs">加载中...</div>;
 
   return (
     <div className={`border rounded-lg p-4 ${colorClass}`}>
       <div className="flex items-center justify-between mb-2">
-        <h5 className="font-medium text-sm text-gray-700">{label}</h5>
+        <h5 className="font-medium text-sm text-gray-700">{label} ({reports.length})</h5>
         <div className="flex items-center gap-1">
-          {report && (
-            <>
-              <button
-                onClick={(e) => { e.stopPropagation(); setEditing(!editing); if (!editing) setEditText(report || ''); }}
-                className="text-xs text-blue-600 hover:text-blue-800"
-              >
-                {editing ? '取消' : '修改'}
-              </button>
-              <button
-                onClick={(e) => { e.stopPropagation(); handleDelete(); }}
-                disabled={deleting}
-                className="text-xs text-red-500 hover:text-red-700"
-              >
-                {deleting ? '删除中...' : '删除'}
-              </button>
-            </>
-          )}
-          <button
-            onClick={(e) => { e.stopPropagation(); router.push(`/tasks/summary?taskId=${taskId}&from=report`); }}
-            className="text-xs text-purple-600 hover:text-purple-800 font-medium"
-          >
+          <button onClick={() => { setShowNew(!showNew); setEditingId(null); }}
+            className="text-xs text-green-600 hover:text-green-800">
+            + 新建
+          </button>
+          <button onClick={() => router.push(`/tasks/summary?taskId=${taskId}&from=report`)}
+            className="text-xs text-purple-600 hover:text-purple-800 font-medium">
             AI 摘要
           </button>
         </div>
       </div>
-      {editing ? (
-        <div>
-          <textarea
-            value={editText}
-            onChange={(e) => setEditText(e.target.value)}
-            className="w-full min-h-[120px] p-3 border border-gray-300 rounded text-sm text-gray-800"
-          />
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="mt-2 px-3 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700 disabled:opacity-50"
-          >
-            {saving ? '保存中...' : '保存'}
-          </button>
+
+      {/* New report form */}
+      {showNew && (
+        <div className="mb-3">
+          <textarea value={newText} onChange={(e) => setNewText(e.target.value)}
+            className="w-full min-h-[100px] p-2 border border-green-300 rounded text-sm text-gray-800" placeholder="撰写新报告..." />
+          <div className="flex gap-2 mt-1">
+            <button onClick={handleCreate} disabled={saving || !newText.trim()}
+              className="px-3 py-1 text-xs font-medium text-white bg-green-600 rounded hover:bg-green-700 disabled:opacity-50">
+              保存
+            </button>
+            <button onClick={() => setShowNew(false)}
+              className="px-3 py-1 text-xs text-gray-600 hover:bg-gray-100 rounded">取消</button>
+          </div>
         </div>
-      ) : report ? (
-        <div className="text-sm text-gray-700 whitespace-pre-wrap">{report}</div>
+      )}
+
+      {reports.length === 0 && !showNew ? (
+        <p className="text-gray-400 text-sm italic">暂无报告</p>
       ) : (
-        <p className="text-gray-400 text-sm italic">{placeholder}</p>
+        <div className="space-y-3">
+          {reports.map(r => (
+            <div key={r.id} className="border-t border-gray-200 pt-2 first:border-t-0 first:pt-0">
+              {editingId === r.id ? (
+                <div>
+                  <textarea value={editText} onChange={(e) => setEditText(e.target.value)}
+                    className="w-full min-h-[100px] p-2 border border-blue-300 rounded text-sm text-gray-800" />
+                  <div className="flex gap-2 mt-1">
+                    <button onClick={handleSaveEdit} disabled={saving}
+                      className="px-3 py-1 text-xs font-medium text-white bg-blue-600 rounded hover:bg-blue-700 disabled:opacity-50">
+                      保存
+                    </button>
+                    <button onClick={() => setEditingId(null)}
+                      className="px-3 py-1 text-xs text-gray-600 hover:bg-gray-100 rounded">取消</button>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <div className="text-sm text-gray-700 whitespace-pre-wrap">{r.content}</div>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-xs text-gray-400">{formatDate(r.createdAt)}</span>
+                    <button onClick={() => handleEdit(r)} className="text-xs text-blue-500 hover:text-blue-700">编辑</button>
+                    <button onClick={() => handleDelete(r.id)} className="text-xs text-red-400 hover:text-red-600">删除</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -413,8 +455,6 @@ export default function ReportContent() {
                           {/* Parent project report */}
                           <ReportSection
                             label="项目报告"
-                            report={parent.report || null}
-                            placeholder="暂无报告，点击 AI 摘要生成"
                             taskId={parent.id}
                             colorClass="border-blue-200 bg-blue-50/50"
                             onReportChanged={handleReportChanged}
@@ -444,7 +484,7 @@ export default function ReportContent() {
                                           {tag.label}
                                         </span>
                                       ))}
-                                      {child.report && <span className="text-xs text-green-500 ml-1">✓</span>}
+                                      {(child as any).reports?.length > 0 && <span className="text-xs text-green-500 ml-1">{(child as any).reports.length}✓</span>}
                                     </div>
                                     {child.description && (
                                       <p className="text-xs text-gray-500 ml-5 mb-1">{child.description}</p>
@@ -454,8 +494,6 @@ export default function ReportContent() {
                                       <div className="ml-6">
                                         <ReportSection
                                           label="进度报告"
-                                          report={child.report || null}
-                                          placeholder="暂无报告，点击 AI 摘要生成"
                                           taskId={child.id}
                                           colorClass="border-gray-200 bg-gray-50"
                                           onReportChanged={handleReportChanged}
