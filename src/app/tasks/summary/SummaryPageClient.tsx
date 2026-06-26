@@ -30,11 +30,18 @@ const CHILD_HINT = '\n\n注意：此任务是一个子任务（进度条目）�
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
 
 // --- Types for related tasks ---
+interface TaskReportItem {
+  id: string;
+  content: string;
+  createdAt: Date;
+}
+
 interface RelatedTask {
   id: string;
   name: string | null;
   description: string | null;
   report: string | null;
+  reports?: TaskReportItem[];
   date: Date;
   type: { name: string; label: string } | null;
   tags: { tag: { name: string; label: string } }[];
@@ -52,6 +59,7 @@ interface CurrentTask {
   name: string | null;
   description: string | null;
   report: string | null;
+  reports?: TaskReportItem[];
   parentId: string | null;
   parent: { id: string; name: string | null; description: string | null } | null;
   children: RelatedTask[];
@@ -158,13 +166,19 @@ export default function SummaryPageClient({ taskId, from }: { taskId?: string; f
           if (isParent && hasChildren) {
             setSummarizing(true);
             const children = (task as unknown as CurrentTask).children || [];
-            const childrenWithReports = children.filter(c => c.report);
+            // Use new multi-report model: collect all report content per child
+            const childrenWithReports = children.filter(c => {
+              const reports = (c as any).reports as TaskReportItem[] | undefined;
+              return reports && reports.length > 0;
+            });
             const newSummaries: Record<string, string> = {};
             for (let i = 0; i < childrenWithReports.length; i++) {
               const child = childrenWithReports[i];
-              setSummarizeProgress(`正在为子任务生成摘要 (${i + 1}/${childrenWithReports.length}): ${child.name}`);
+              const childReports = (child as any).reports as TaskReportItem[];
+              const allContent = childReports.map(r => r.content).join('\n\n---\n\n');
+              setSummarizeProgress(`正在为子任务生成摘要 (${i + 1}/${childrenWithReports.length}): ${child.name} (${childReports.length} 份报告)`);
               try {
-                const summary = await summarizeChildReport(child.report!, selectedModelRef.current);
+                const summary = await summarizeChildReport(allContent, selectedModelRef.current);
                 newSummaries[child.id] = summary;
               } catch { /* skip failed summarizations */ }
             }
@@ -308,7 +322,14 @@ export default function SummaryPageClient({ taskId, from }: { taskId?: string; f
     if (currentTask) {
       parts.push(`- 任务名称: ${currentTask.name || '(未命名)'}`);
       if (currentTask.description) parts.push(`- 描述: ${currentTask.description}`);
-      if (currentTask.report) parts.push(`- 已有报告: ${currentTask.report}`);
+      // Include all reports (new multi-report model)
+      const currentReports = currentTask.reports || [];
+      if (currentReports.length > 0) {
+        parts.push(`- 已有报告 (${currentReports.length} 份):`);
+        currentReports.forEach((r, i) => {
+          parts.push(`  报告 ${i + 1}: ${r.content.substring(0, 500)}${r.content.length > 500 ? '...' : ''}`);
+        });
+      }
     } else {
       parts.push('(无)');
     }
@@ -321,15 +342,15 @@ export default function SummaryPageClient({ taskId, from }: { taskId?: string; f
       effectiveRelatedTasks.forEach(t => {
         let text = `- ${t.name || '(未命名)'}`;
         if (t.description) text += ` | 描述: ${t.description}`;
-        // Use pre-generated summary if available, with truncated original as fallback
-        const summary = childSummaries[t.id];
-        if (t.report && summary) {
-          text += ` | 报告摘要: ${summary}`;
-          // Also include first 150 chars of original as safety net
-          if (t.report.length > 150) {
-            text += ` | 原文首段: ${t.report.substring(0, 150)}...`;
-          }
+        // Include all reports from the multi-report model
+        const taskReports = (t as any).reports as TaskReportItem[] | undefined;
+        if (taskReports && taskReports.length > 0) {
+          text += ` | 报告 (${taskReports.length} 份):`;
+          taskReports.forEach((r, i) => {
+            text += ` [报告${i + 1}: ${r.content.substring(0, 200)}${r.content.length > 200 ? '...' : ''}]`;
+          });
         } else if (t.report) {
+          // Fallback to legacy single report
           text += ` | 报告: ${t.report.substring(0, 400)}`;
         }
         parts.push(text);
@@ -541,7 +562,7 @@ export default function SummaryPageClient({ taskId, from }: { taskId?: string; f
                     <div>
                       <span className="text-sm font-medium text-gray-700">{t.name || '(未命名)'}</span>
                       {t.description && <span className="text-xs text-gray-500 ml-2">- {t.description}</span>}
-                      {t.report && <span className="text-xs text-green-600 ml-2">[已有报告]</span>}
+                      {((t as any).reports?.length > 0 || t.report) && <span className="text-xs text-green-600 ml-2">[已有报告]</span>}
                       {isAuto && <span className="text-xs text-blue-500 ml-2">[自动]</span>}
                     </div>
                     {!isAuto && (
