@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 interface TaskFiltersProps {
   taskTypes: { name: string; label: string; }[];
@@ -32,6 +32,10 @@ export default function TaskFilters({
     initialFilters.showCompleted === true ? 'completed' : initialFilters.showCompleted === false ? 'active' : 'all'
   );
 
+  // Track if this is the initial render
+  const isInitial = useRef(true);
+
+  // Sync from parent initialFilters
   useEffect(() => {
     setType(initialFilters.type);
     setStartDate(initialFilters.startDate);
@@ -41,24 +45,27 @@ export default function TaskFilters({
     );
   }, [initialFilters]);
 
-  const notifyFilterChange = () => {
+  // Auto-notify parent whenever any filter changes (skip initial mount)
+  useEffect(() => {
+    if (isInitial.current) {
+      isInitial.current = false;
+      return;
+    }
     onFilterChange({
       type,
       startDate: startDate ? new Date(startDate) : null,
       endDate: endDate ? new Date(endDate) : null,
       showCompleted: showCompleted === 'all' ? null : showCompleted === 'completed',
     });
-  };
+  }, [type, startDate, endDate, showCompleted]);
 
   const handleClearFilters = () => {
     setType('');
     setStartDate('');
     setEndDate('');
     setShowCompleted('all');
-    setTimeout(() => {
-      onFilterChange({ type: '', startDate: null, endDate: null, showCompleted: null });
-      if (onClearFilters) onClearFilters();
-    }, 0);
+    // onFilterChange will fire via the useEffect above, and onClearFilters via the parent
+    if (onClearFilters) onClearFilters();
   };
 
   return (
@@ -68,7 +75,7 @@ export default function TaskFilters({
         <div>
           <label className="block text-sm font-medium text-gray-900 mb-1">分类</label>
           <select value={type}
-            onChange={(e) => { setType(e.target.value); setTimeout(notifyFilterChange, 0); }}
+            onChange={(e) => setType(e.target.value)}
             className="w-full p-2 border border-gray-300 rounded-md text-gray-900">
             <option value="">全部分类</option>
             {taskTypes.map(t => <option key={t.name} value={t.name}>{t.label}</option>)}
@@ -96,16 +103,13 @@ export default function TaskFilters({
             <label key={o.value} className="flex items-center gap-1 cursor-pointer">
               <input type="radio" name="completed" value={o.value}
                 checked={showCompleted === o.value}
-                onChange={(e) => { setShowCompleted(e.target.value); setTimeout(notifyFilterChange, 0); }}
+                onChange={(e) => setShowCompleted(e.target.value)}
                 className="text-blue-600" />
               <span className="text-sm text-gray-700">{o.label}</span>
             </label>
           ))}
         </div>
         <div className="flex gap-2 ml-auto">
-          <button onClick={notifyFilterChange} className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 text-sm">
-            筛选
-          </button>
           <button onClick={handleClearFilters} className="px-4 py-2 bg-gray-200 text-gray-900 rounded-md hover:bg-gray-300 text-sm">
             清除筛选
           </button>
