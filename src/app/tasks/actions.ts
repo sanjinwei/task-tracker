@@ -269,6 +269,48 @@ export async function updateTask({
   });
 }
 
+/**
+ * Toggle task completion status with validation:
+ * - Parent task: requires at least 1 report
+ * - Child task: requires description or at least 1 report
+ */
+export async function toggleTaskComplete(id: string): Promise<{ success: boolean; message: string }> {
+  const task = await prisma.task.findUnique({
+    where: { id },
+    select: {
+      parentId: true,
+      description: true,
+      reports: { select: { id: true } },
+    },
+  });
+  if (!task) return { success: false, message: '任务不存在' };
+
+  const hasReports = task.reports.length > 0;
+  const hasDescription = task.description && task.description.trim() !== '';
+
+  // Check if it's currently completed → allow un-completing without checks
+  const current = await prisma.task.findUnique({ where: { id }, select: { completed: true } });
+  if (!current?.completed) {
+    if (task.parentId) {
+      // Child task: needs description or at least one report
+      if (!hasDescription && !hasReports) {
+        return { success: false, message: '子任务必须填写描述或至少有一份报告才能标记为完成' };
+      }
+    } else {
+      // Parent task: needs at least one report
+      if (!hasReports) {
+        return { success: false, message: '父任务必须至少有一份报告才能标记为完成，请先撰写工作日志' };
+      }
+    }
+  }
+
+  await prisma.task.update({
+    where: { id },
+    data: { completed: !current?.completed },
+  });
+  return { success: true, message: current?.completed ? '已取消完成标记' : '任务已完成' };
+}
+
 export async function deleteTask(id: string) {
   // Find all child tasks
   const children = await prisma.task.findMany({

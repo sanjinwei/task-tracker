@@ -37,6 +37,7 @@ model Task {
   date        DateTime  @default(now())
   link        String?
   report      String?   // @deprecated — replaced by Report model
+  completed   Boolean   @default(false)
   reports     Report[]
   createdAt   DateTime  @default(now())
   tags        TaskTag[]

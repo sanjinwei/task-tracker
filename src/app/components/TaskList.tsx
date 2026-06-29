@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { format } from 'date-fns';
 import TaskFilters from './TaskFilters';
-import { fetchTasks, getAllTaskTypes, getAllTags, updateTask, deleteTask, fetchParentTaskOptions, getReports, createReport, updateReport, deleteReport } from '@/app/tasks/actions';
+import { fetchTasks, getAllTaskTypes, getAllTags, updateTask, deleteTask, fetchParentTaskOptions, getReports, createReport, updateReport, deleteReport, toggleTaskComplete } from '@/app/tasks/actions';
 import { useTaskContext } from '@/app/lib/TaskContext';
 
 interface TaskReport {
@@ -19,6 +19,7 @@ interface Task {
   description: string | null;
   report: string | null;
   reports?: TaskReport[];
+  completed?: boolean;
   parentId: string | null;
   children?: Task[];
   date: Date;
@@ -237,6 +238,7 @@ function TaskCard({
   onDelete,
   onAddSubtask,
   onReport,
+  onComplete,
 }: {
   task: Task;
   isChild?: boolean;
@@ -244,13 +246,14 @@ function TaskCard({
   onDelete: (taskId: string) => void;
   onAddSubtask?: (parentId: string) => void;
   onReport?: (task: Task) => void;
+  onComplete?: (task: Task) => void;
 }) {
   return (
     <div className={`${isChild ? 'bg-gray-50 border-gray-100' : 'bg-white border-gray-200'} p-3 rounded-lg shadow-sm border hover:shadow-md transition-shadow`}>
       <div className="flex items-start justify-between">
         <div className="flex-1">
-          {task.name && <p className={`text-gray-900 ${isChild ? 'text-sm font-medium' : 'font-medium'}`}>{task.name}</p>}
-          {task.description && <p className={`text-gray-600 mt-0.5 ${isChild ? 'text-xs' : 'text-sm'}`}>{task.description}</p>}
+          {task.name && <p className={`${task.completed ? 'text-gray-400 line-through' : 'text-gray-900'} ${isChild ? 'text-sm font-medium' : 'font-medium'}`}>{task.name}</p>}
+          {task.description && <p className={`${task.completed ? 'text-gray-400' : 'text-gray-600'} mt-0.5 ${isChild ? 'text-xs' : 'text-sm'}`}>{task.description}</p>}
           {!task.name && !task.description && <p className="text-gray-400 text-sm italic">无详情</p>}
           {task.link && (
             <a href={task.link} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 text-xs block mt-1 truncate max-w-md">
@@ -292,6 +295,17 @@ function TaskCard({
               return format(new Date(task.date), 'MMM d, yyyy');
             })()}
           </time>
+          {onComplete && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onComplete(task); }}
+              className={`p-1 ${task.completed ? 'text-green-500 hover:text-green-700' : 'text-gray-300 hover:text-green-500'}`}
+              title={task.completed ? '取消完成' : '标记完成'}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+              </svg>
+            </button>
+          )}
           {onAddSubtask && !isChild && (
             <button
               onClick={(e) => { e.stopPropagation(); onAddSubtask(task.id); }}
@@ -525,9 +539,9 @@ export default function TaskList() {
   const [error, setError] = useState<string | null>(null);
   const [filters, setFilters] = useState({
     type: '',
-    tag: '',
     startDate: null as Date | null,
     endDate: null as Date | null,
+    showCompleted: null as boolean | null,
   });
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
@@ -603,7 +617,6 @@ export default function TaskList() {
   const fetchTasksWithCurrentFilter = useCallback(async () => {
     return await fetchTasks({
       type: filters.type || undefined,
-      tag: filters.tag || undefined,
       startDate: filters.startDate || undefined,
       endDate: filters.endDate || undefined,
     });
@@ -631,18 +644,11 @@ export default function TaskList() {
 
   const handleFilterChange = (newFilters: {
     type: string;
-    tag: string;
     startDate: Date | null;
     endDate: Date | null;
+    showCompleted: boolean | null;
   }) => {
-    if (
-      newFilters.type !== filters.type ||
-      newFilters.tag !== filters.tag ||
-      (newFilters.startDate?.getTime() !== filters.startDate?.getTime()) ||
-      (newFilters.endDate?.getTime() !== filters.endDate?.getTime())
-    ) {
-      setFilters(newFilters);
-    }
+    setFilters(newFilters);
   };
 
   const handleEditTask = async (updatedTask: {
@@ -692,6 +698,20 @@ export default function TaskList() {
     setAllTasks(filteredTasks);
   };
 
+  const handleComplete = async (task: Task) => {
+    try {
+      const result = await toggleTaskComplete(task.id);
+      if (result.success) {
+        showNotification('success', result.message);
+        await refreshTasks();
+      } else {
+        showNotification('error', result.message);
+      }
+    } catch {
+      showNotification('error', '操作失败');
+    }
+  };
+
   const toggleExpand = (parentId: string) => {
     setExpandedParentIds(prev => {
       const next = new Set(prev);
@@ -716,13 +736,13 @@ export default function TaskList() {
 
   const initialFiltersValue = {
     type: filters.type,
-    tag: filters.tag,
     startDate: formatDateForInput(filters.startDate),
-    endDate: formatDateForInput(filters.endDate)
+    endDate: formatDateForInput(filters.endDate),
+    showCompleted: filters.showCompleted,
   };
 
   const handleClearFilters = () => {
-    setFilters({ type: '', tag: '', startDate: null, endDate: null });
+    setFilters({ type: '', startDate: null, endDate: null, showCompleted: null });
     setChildFilters({ type: '', tag: '', startDate: null, endDate: null });
   };
 
@@ -730,7 +750,7 @@ export default function TaskList() {
   const deletingTask = deletingTaskId ? allTasks.find(t => t.id === deletingTaskId) : null;
   const deletingTaskChildCount = deletingTask?.children ? deletingTask.children.length : 0;
 
-  // Slack-ping group logic: check both parents and children
+  // Slack-ping group logic
   const slackPingParents = parentTasks.filter(t =>
     t.tags.some(({ tag }) => tag.name === 'slack-ping')
   );
@@ -741,11 +761,62 @@ export default function TaskList() {
     )
   ];
 
+  // ---- Tag section definitions ----
+  const TAG_SECTION_ORDER = [
+    'urgent-important',
+    'not-urgent-important',
+    'not-urgent-not-important',
+    'urgent-not-important',
+  ];
+  const TAG_COLORS: Record<string, { bg: string; border: string; header: string }> = {
+    'urgent-important':       { bg: 'bg-red-50', border: 'border-red-200', header: 'text-red-800' },
+    'not-urgent-important':   { bg: 'bg-yellow-50', border: 'border-yellow-200', header: 'text-yellow-800' },
+    'not-urgent-not-important': { bg: 'bg-green-50', border: 'border-green-200', header: 'text-green-800' },
+    'urgent-not-important':   { bg: 'bg-blue-50', border: 'border-blue-200', header: 'text-blue-800' },
+  };
+
+  // Filter tasks by showCompleted
+  const filterByCompleted = (task: Task): boolean => {
+    if (filters.showCompleted === null) return true;
+    return filters.showCompleted ? !!task.completed : !task.completed;
+  };
+
+  // Build tag → tasks map from allTasks (both parents and children)
+  const tagTaskMap = useMemo(() => {
+    const map = new Map<string, { parents: Task[]; children: Task[] }>();
+    for (const t of allTasks) {
+      if (!filterByCompleted(t)) continue;
+      for (const { tag: tg } of t.tags) {
+        if (!map.has(tg.name)) map.set(tg.name, { parents: [], children: [] });
+        const entry = map.get(tg.name)!;
+        if (t.parentId) entry.children.push(t);
+        else entry.parents.push(t);
+      }
+    }
+    return map;
+  }, [allTasks, filters.showCompleted]);
+
+  // Ordered tag names for display
+  const orderedTagNames = useMemo(() => {
+    const existing = new Set(tagTaskMap.keys());
+    const ordered = TAG_SECTION_ORDER.filter(t => existing.has(t));
+    // Append any user-created tags not in default order
+    for (const name of existing) {
+      if (!TAG_SECTION_ORDER.includes(name)) ordered.push(name);
+    }
+    return ordered;
+  }, [tagTaskMap]);
+
+  // Get tag label by name
+  const getTagLabel = (name: string): string => {
+    const tag = tags.find(t => t.name === name);
+    return tag?.label || name;
+  };
+
   return (
     <div>
       <TaskFilters
         taskTypes={taskTypes}
-        tags={tags}
         onFilterChange={handleFilterChange}
         initialFilters={initialFiltersValue}
         onClearFilters={handleClearFilters}
@@ -789,91 +860,79 @@ export default function TaskList() {
 
       {isLoading ? (
         <div className="text-center py-8"><p className="text-gray-500">加载中...</p></div>
-      ) : parentTasks.length === 0 ? (
+      ) : orderedTagNames.length === 0 ? (
         <div className="text-center py-8"><p className="text-gray-500">没有匹配的任务</p></div>
       ) : (
-        <div className="space-y-3">
-          {/* Slack Ping Tasks Group */}
-          {allSlackPingTasks.length > 0 && (
-            <div className="bg-blue-50 p-4 rounded-lg shadow-sm border border-blue-200">
-              {isSlackPingGroupExpanded ? (
-                <div>
-                  <div className="flex justify-between items-center mb-3">
-                    <h3 className="text-blue-900 font-medium">Slack 消息 ({allSlackPingTasks.length})</h3>
-                    <button onClick={() => setIsSlackPingGroupExpanded(false)}
-                      className="text-blue-600 hover:text-blue-800 text-sm font-medium">收起</button>
-                  </div>
-                  <div className="space-y-2">
-                    {allSlackPingTasks
-                      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-                      .map(task => (
-                        <TaskCard key={task.id} task={task} isChild={!!task.parentId}
-                          onEdit={setEditingTask} onDelete={(id) => setDeletingTaskId(id)}
-                          onAddSubtask={!task.parentId ? handleAddSubtask : undefined}
-                          onReport={setReportingTask} />
-                      ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="flex justify-between items-center">
-                  <span className="text-blue-900 font-medium">
-                    {allSlackPingTasks.length} Slack {allSlackPingTasks.length === 1 ? 'ping' : 'pings'} 已回复
-                  </span>
-                  <button onClick={() => setIsSlackPingGroupExpanded(true)}
-                    className="text-blue-600 hover:text-blue-800 text-sm font-medium">展开</button>
-                </div>
-              )}
-            </div>
-          )}
+        <div className={`grid gap-4 ${orderedTagNames.length <= 4 ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'}`}>
+          {orderedTagNames.map(tagName => {
+            const section = tagTaskMap.get(tagName);
+            if (!section) return null;
+            const color = TAG_COLORS[tagName] || { bg: 'bg-gray-50', border: 'border-gray-200', header: 'text-gray-700' };
+            const allInSection = [...section.parents, ...section.children]
+              .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-          {/* Parent Task Cards (hierarchical) */}
-          {parentTasks
-            .filter(t => !t.tags.some(({ tag }) => tag.name === 'slack-ping'))
-            .map(parent => {
-              const isExpanded = expandedParentIds.has(parent.id);
-              const filteredChildren = getFilteredChildren(parent.id);
-
-              return (
-                <div key={parent.id}>
-                  {/* Parent card */}
-                  <div className="cursor-pointer" onClick={() => toggleExpand(parent.id)}>
-                    <div className="flex items-center gap-2 mb-1">
-                      <svg xmlns="http://www.w3.org/2000/svg"
-                        className={`h-4 w-4 text-gray-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
-                        viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
-                      </svg>
-                      <span className="text-xs text-gray-500">
-                        {filteredChildren.length > 0 ? `${filteredChildren.length} 个子任务` : '无子任务'}
-                      </span>
-                    </div>
-                    <TaskCard task={parent}
-                      onEdit={setEditingTask}
-                      onDelete={(id) => setDeletingTaskId(id)}
-                      onAddSubtask={handleAddSubtask}
-                      onReport={setReportingTask} />
-                  </div>
-
-                  {/* Children section */}
-                  {isExpanded && (
-                    <div className="ml-6 pl-4 border-l-2 border-blue-200 mt-1 space-y-2">
-                      {filteredChildren.length === 0 ? (
-                        <p className="text-gray-400 text-sm py-2">没有匹配的子任务</p>
-                      ) : (
-                        filteredChildren
-                          .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-                          .map(child => (
-                            <TaskCard key={child.id} task={child} isChild
-                              onEdit={setEditingTask}
-                              onDelete={(id) => setDeletingTaskId(id)}
-                              onReport={setReportingTask} />
-                          ))
-                      )}
-                    </div>
-                  )}
+            return (
+              <div key={tagName} className={`rounded-lg border shadow-sm ${color.bg} ${color.border}`}>
+                <div className={`px-4 py-2.5 border-b ${color.border} flex justify-between items-center`}>
+                  <h3 className={`font-semibold text-sm ${color.header}`}>
+                    {getTagLabel(tagName)}
+                    <span className="ml-2 font-normal text-xs opacity-70">({allInSection.length})</span>
+                  </h3>
                 </div>
-              );
-            })}
+                <div className="p-2 space-y-2 max-h-[500px] overflow-y-auto">
+                  {/* Group children under their parents within this tag section */}
+                  {section.parents.map(parent => {
+                    const isExpanded = expandedParentIds.has(parent.id);
+                    const childTasks = section.children.filter(c => c.parentId === parent.id);
+                    const hasChildren = (parent.children || []).length > 0;
+                    return (
+                      <div key={parent.id}>
+                        <div className="cursor-pointer" onClick={() => toggleExpand(parent.id)}>
+                          {hasChildren && (
+                            <div className="flex items-center gap-1 mb-0.5 ml-1">
+                              <svg xmlns="http://www.w3.org/2000/svg"
+                                className={`h-3.5 w-3.5 text-gray-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                                viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                              </svg>
+                              <span className="text-xs text-gray-400">{childTasks.length} 子任务</span>
+                            </div>
+                          )}
+                          <TaskCard task={parent}
+                            onEdit={setEditingTask}
+                            onDelete={(id) => setDeletingTaskId(id)}
+                            onAddSubtask={handleAddSubtask}
+                            onReport={setReportingTask}
+                            onComplete={handleComplete} />
+                        </div>
+                        {isExpanded && hasChildren && (
+                          <div className="ml-4 pl-3 border-l-2 border-gray-200 mt-0.5 space-y-1">
+                            {childTasks.map(child => (
+                              <TaskCard key={child.id} task={child} isChild
+                                onEdit={setEditingTask}
+                                onDelete={(id) => setDeletingTaskId(id)}
+                                onReport={setReportingTask}
+                                onComplete={handleComplete} />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {/* Orphan children (parent not in this tag section, or no parent) */}
+                  {section.children
+                    .filter(c => !section.parents.some(p => p.id === c.parentId))
+                    .map(child => (
+                      <TaskCard key={child.id} task={child} isChild
+                        onEdit={setEditingTask}
+                        onDelete={(id) => setDeletingTaskId(id)}
+                        onReport={setReportingTask}
+                        onComplete={handleComplete} />
+                    ))}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
