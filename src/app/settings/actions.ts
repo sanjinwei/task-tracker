@@ -232,38 +232,65 @@ export async function updateTag(id: string, label: string, name: string): Promis
  * Deletes a tag
  * @param id - The ID of the tag to delete
  */
-export async function deleteTag(id: string): Promise<{ 
-  success: boolean; 
-  message: string; 
+export async function deleteTag(id: string): Promise<{
+  success: boolean;
+  message: string;
+  affectedTasks?: string[];
 }> {
   try {
-    // Check if there are any tasks using this tag
-    const tasksUsingTag = await prisma.taskTag.count({
-      where: { tagId: id }
+    // Find parent tasks using this tag (via TaskTag join)
+    const taskTags = await prisma.taskTag.findMany({
+      where: { tagId: id },
+      include: {
+        task: {
+          select: {
+            id: true,
+            name: true,
+            parentId: true,
+          },
+        },
+      },
     });
-    
-    if (tasksUsingTag > 0) {
+
+    // Collect unique parent task names
+    const parentTasks = new Map<string, string>();
+    for (const tt of taskTags) {
+      const t = tt.task;
+      if (t.parentId) {
+        // This is a child task — look up its parent
+        const parent = await prisma.task.findUnique({
+          where: { id: t.parentId },
+          select: { name: true },
+        });
+        if (parent && !parentTasks.has(t.parentId)) {
+          parentTasks.set(t.parentId, parent.name || '(未命名)');
+        }
+      } else {
+        // This is a parent task
+        if (!parentTasks.has(t.id)) {
+          parentTasks.set(t.id, t.name || '(未命名)');
+        }
+      }
+    }
+
+    if (taskTags.length > 0) {
+      const taskNames = Array.from(parentTasks.values());
       return {
         success: false,
-        message: `Cannot delete: ${tasksUsingTag} task(s) are using this tag`
+        message: `无法删除此标签，共 ${taskTags.length} 个任务正在使用`,
+        affectedTasks: taskNames,
       };
     }
-    
+
+    // Delete tag from automation rules first
+    await prisma.automationRuleTag.deleteMany({ where: { tagId: id } });
     // Delete the tag
-    await prisma.tag.delete({
-      where: { id }
-    });
-    
-    return {
-      success: true,
-      message: 'Tag deleted successfully'
-    };
+    await prisma.tag.delete({ where: { id } });
+
+    return { success: true, message: '标签删除成功' };
   } catch (error) {
     console.error('Error deleting tag:', error);
-    return {
-      success: false,
-      message: 'Failed to delete tag'
-    };
+    return { success: false, message: '标签删除失败' };
   }
 }
 

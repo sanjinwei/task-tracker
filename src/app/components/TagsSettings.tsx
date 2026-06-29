@@ -162,35 +162,28 @@ export default function TagsSettings() {
   };
 
   const handleDeleteTag = async () => {
-    if (!deletingTag) {
-      return;
-    }
-
+    if (!deletingTag) return;
     setIsDeletingTag(true);
     setStatusMessage(null);
 
     try {
       const result = await deleteTag(deletingTag.id);
-
       if (result.success) {
         closeDeleteTagModal();
         await loadTags();
-        setStatusMessage({
-          type: 'success',
-          text: result.message
-        });
+        setStatusMessage({ type: 'success', text: result.message });
       } else {
-        setStatusMessage({
-          type: 'error',
-          text: result.message
-        });
+        // Show affected task names
+        const names = result.affectedTasks || [];
+        const detail = names.length > 0
+          ? `\n\n需删除此标签请先修改以下任务标签：\n${names.map(n => `• ${n}`).join('\n')}`
+          : '';
+        setStatusMessage({ type: 'error', text: result.message + detail });
+        closeDeleteTagModal();
       }
     } catch (error) {
       console.error('Error deleting tag:', error);
-      setStatusMessage({
-        type: 'error',
-        text: '发生未知错误'
-      });
+      setStatusMessage({ type: 'error', text: '发生未知错误' });
     } finally {
       setIsDeletingTag(false);
     }

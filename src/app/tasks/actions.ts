@@ -263,15 +263,44 @@ export async function updateTask({
   }
 
   // Update the task
-  return await prisma.task.update({
+  const updated = await prisma.task.update({
     where: { id },
     data: updateData
   });
+
+  // If this is a parent task and tags changed, sync tags to all children
+  if (allTagIds.length > 0) {
+    const children = await prisma.task.findMany({
+      where: { parentId: id },
+      select: { id: true },
+    });
+    if (children.length > 0) {
+      // Delete existing tags for all children
+      await prisma.taskTag.deleteMany({
+        where: { taskId: { in: children.map(c => c.id) } },
+      });
+      // Re-create with parent's new tags
+      for (const child of children) {
+        await prisma.task.update({
+          where: { id: child.id },
+          data: {
+            tags: {
+              create: allTagIds.map(tagId => ({
+                tag: { connect: { id: tagId } },
+              })),
+            },
+          },
+        });
+      }
+    }
+  }
+
+  return updated;
 }
 
 /**
  * Toggle task completion status with validation:
- * - Parent task: requires at least 1 report
+ * - Parent task: requires at least 1 report AND all children completed
  * - Child task: requires description or at least 1 report
  */
 export async function toggleTaskComplete(id: string): Promise<{ success: boolean; message: string }> {
@@ -281,25 +310,32 @@ export async function toggleTaskComplete(id: string): Promise<{ success: boolean
       parentId: true,
       description: true,
       reports: { select: { id: true } },
+      children: { select: { id: true, name: true, completed: true } },
     },
   });
   if (!task) return { success: false, message: '任务不存在' };
 
   const hasReports = task.reports.length > 0;
   const hasDescription = task.description && task.description.trim() !== '';
+  const isParent = !task.parentId && task.children.length > 0;
 
   // Check if it's currently completed → allow un-completing without checks
   const current = await prisma.task.findUnique({ where: { id }, select: { completed: true } });
   if (!current?.completed) {
-    if (task.parentId) {
+    if (isParent) {
+      // Parent task: needs at least 1 report + all children completed
+      if (!hasReports) {
+        return { success: false, message: '父任务必须至少有一份报告才能标记为完成，请先撰写工作日志' };
+      }
+      const incompleteChildren = task.children.filter(c => !c.completed);
+      if (incompleteChildren.length > 0) {
+        const names = incompleteChildren.map(c => c.name || '(未命名)').join('、');
+        return { success: false, message: `还有 ${incompleteChildren.length} 个子任务未完成：${names}。请先完成所有子任务后再完成父任务。` };
+      }
+    } else if (task.parentId) {
       // Child task: needs description or at least one report
       if (!hasDescription && !hasReports) {
         return { success: false, message: '子任务必须填写描述或至少有一份报告才能标记为完成' };
-      }
-    } else {
-      // Parent task: needs at least one report
-      if (!hasReports) {
-        return { success: false, message: '父任务必须至少有一份报告才能标记为完成，请先撰写工作日志' };
       }
     }
   }
